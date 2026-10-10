@@ -121,15 +121,12 @@ if (fs.existsSync(staticDir)) {
   app.use('/fast-learning', express.static(staticDir));
   app.use(express.static(staticDir));
 
-  app.get('/fast-learning/*', (req, res) => {
-    res.sendFile(path.join(staticDir, 'index.html'));
-  });
-
-  app.get('*', (req, res, next) => {
-    if (req.url.startsWith('/api')) {
-      return next();
+  // SPA fallback for non-API GET requests (Express 5 compatible)
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/fast-learning/api')) {
+      return res.sendFile(path.join(staticDir, 'index.html'));
     }
-    res.sendFile(path.join(staticDir, 'index.html'));
+    next();
   });
 }
 
@@ -159,11 +156,9 @@ export async function startServer() {
   return server;
 }
 
-if (process.argv[1] && (process.argv[1].endsWith('index.ts') || process.argv[1].endsWith('index.js'))) {
-  startServer().catch(err => {
-    console.error('Failed to start server:', err);
-    process.exit(1);
-  });
-}
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
 
 export default app;
