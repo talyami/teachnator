@@ -1,0 +1,42 @@
+/* Custom styles and animations for NeuroQuest RPG */
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes spinSlow {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.animate-float-slow {
+  animation: floatSlow 3s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spinSlow 20s linear infinite;
+}
+
+@keyframes forgeSpin {
+  to { transform: rotate(360deg); }
+}
+
+.forge-spinner {
+  animation: forgeSpin 0.8s linear infinite;
+}
+
+@keyframes forgeBar {
+  0% { transform: translateX(-60%); }
+  100% { transform: translateX(220%); }
+}
+
+.forge-bar {
+  animation: forgeBar 1.4s ease-in-out infinite;
+}
+
+.arcade-grid-bg {
+  background-size: 36px 36px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}

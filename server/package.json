@@ -1,0 +1,40 @@
+{
+  "name": "@fast-learning/server",
+  "version": "2.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && node -e \"const fs = require('fs'); const path = require('path'); const dest = 'dist/db/migrations'; if(!fs.existsSync(dest)) fs.mkdirSync(dest, {recursive:true}); fs.copyFileSync('src/db/migrations/001_init.sql', path.join(dest, '001_init.sql'));\"",
+    "start": "node dist/index.js",
+    "migrate": "tsx src/db/migrate.ts",
+    "seed": "tsx src/db/seed.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fast-learning/shared": "file:../shared",
+    "@google/genai": "^2.27.0",
+    "@google/generative-ai": "^0.24.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.0.1",
+    "express-rate-limit": "^7.5.0",
+    "google-auth-library": "^9.15.1",
+    "helmet": "^8.0.0",
+    "jose": "^5.9.6",
+    "mysql2": "^3.12.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.8",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.5",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  }
+}
