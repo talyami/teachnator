@@ -1569,7 +1569,10 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
       const isShort = !isFillBlank && (q.type === 'short_answer' || (!hasOptions && Boolean(q.expectedAnswer || !q.options?.length)));
       const finalType = isFillBlank ? 'fill_blank' : (isShort ? 'short_answer' : 'mcq');
 
-      const expected = q.expectedAnswer || (isFillBlank ? (q.missingWord || '') : (hasOptions && typeof q.correct === 'number' ? q.options[q.correct] : '')) || '';
+      const rawCorrect = typeof q.correct === 'string' && /^\d+$/.test(q.correct.trim()) ? Number(q.correct) : q.correct;
+      const matchedAnswer = hasOptions ? q.options.findIndex(option => String(option).trim() === String(q.missingWord || q.expectedAnswer || '').trim()) : -1;
+      const correctIndex = Number.isInteger(rawCorrect) && rawCorrect >= 0 && rawCorrect < q.options?.length ? rawCorrect : (matchedAnswer >= 0 ? matchedAnswer : null);
+      const expected = q.expectedAnswer || (isFillBlank ? (q.missingWord || '') : (hasOptions && correctIndex !== null ? q.options[correctIndex] : '')) || '';
       const missingWord = q.missingWord || (isFillBlank ? expected : '');
       const clozeText = q.clozeText || (isFillBlank && q.text && missingWord ? q.text.replace(missingWord, '[_____]') : (q.text || ''));
       const language = getContentLanguage(q);
@@ -1580,7 +1583,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         type: finalType,
         text: q.text || '',
         options: Array.isArray(q.options) ? q.options : (isFillBlank && missingWord ? [missingWord] : []),
-        correct: typeof q.correct === 'number' ? q.correct : 0,
+        correct: finalType === 'short_answer' ? null : correctIndex,
         expectedAnswer: expected,
         missingWord: missingWord,
         clozeText: clozeText,
@@ -1598,6 +1601,31 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         reviewQueueCount: typeof q.reviewQueueCount === 'number' ? q.reviewQueueCount : 0
       };
     };
+
+    // Fisher–Yates: shuffle copies, never mutate study questions or saved quiz order.
+    const shuffledCopy = (items, random = Math.random) => {
+      const result = [...items];
+      for (let i = result.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [result[i], result[j]] = [result[j], result[i]];
+      }
+      return result;
+    };
+
+    const randomizeQuestionOptions = (question, random = Math.random) => {
+      const q = normalizeQuestion(question);
+      if (!q || q.type === 'short_answer' || q.options.length < 2) return q;
+      if (!Number.isInteger(q.correct)) throw new Error('Question has no valid correct answer: ' + q.text);
+      const choices = shuffledCopy(q.options.map((text, index) => ({ text, index })), random);
+      return {
+        ...q,
+        options: choices.map(choice => choice.text),
+        correct: choices.findIndex(choice => choice.index === q.correct)
+      };
+    };
+
+    const prepareQuizQuestions = (questions, random = Math.random) =>
+      shuffledCopy(questions, random).map(question => randomizeQuestionOptions(question, random)).filter(Boolean);
 
     // فحص ما إذا كان السؤال سؤال إجابة قصيرة (Short Answer)
     const isShortAnswerQuestion = (q) => {
@@ -1799,6 +1827,13 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         4. سر الفكرة والتعليل الذاتي (Elaborative Interrogation): تفسير بديهي في جملة واحدة يشرح "لماذا" هذا المفهوم منطقي في العالم الواقعي.
         5. التجزئة الذهنية (Chunking): استخراج المفهوم الجوهري في 2-3 كلمات ككبسولة مركزية.
 
+        QUESTION VARIETY REQUIREMENT:
+        Create a real mixture of mcq, fill_blank and short_answer, not only multiple choice.
+        For 6+ questions, aim for about 50% mcq, 30% fill_blank and 20% short_answer; include at least one of each when supported by the material.
+        For 3–5 questions, include all three types where meaningful. Do not invent facts merely to meet ratios.
+        Definitions and key terms suit fill_blank; reasons, comparisons and explanations suit short_answer even when the source is prose, not a prewritten question.
+        Distribute correct MCQ/blank option indices across the available positions; correct is a zero-based integer, never a letter or a one-based index.
+
         التعليمات الصارمة لتصنيف أنواع الأسئلة وفق سياق الدرس:
         1. أسئلة الاختيار من متعدد وصح/خطأ ("type": "mcq"):
            - تُستخدم للمفاهيم والشروحات والمعلومات العامة والحقائق.
@@ -1814,7 +1849,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
            - ضع الكلمة الصحيحة أيضاً في "expectedAnswer".
 
         3. أسئلة الإجابة القصيرة والتعليل ("type": "short_answer"):
-           - تقتصر حصرياً على الأجزاء التي يقتضي سياق المادة كونها مقالية صريحة (مثل: علل، اذكر السبب، بم تفسر، ماذا يحدث عندما).
+           - تُستخدم للتعليل، المقارنة، الشرح المختصر واسترجاع مفهوم من المادة، حتى لو لم يكن النص الأصلي مكتوباً كسؤال مقالي (مثل: علل، اذكر السبب، بم تفسر، ماذا يحدث عندما).
            - ضع الإجابة النموذجية المباشرة والموجزة في "expectedAnswer".
            - اجعل "options": [] و "correct": null.
 
@@ -1898,9 +1933,10 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         
         مهمتك مراجعة المسودة وتصحيحها وضبط أنواع الأسئلة وفق سياق المادة بدقة تامة والتأكد من شمولية وتغطية الأسئلة لجميع الصفحات والمرفقات المدمجة:
         1. تدقيق وتصحيح نوع السؤال وفق سياق المادة (Context-Driven Verification):
-           - راجع كل سؤال تم تعيينه كـ "short_answer": إذا كان في الأصل مفهوماً أو حقيقة أو شرحاً أو جملة عادية لا تقتضي بطبيعتها وسياقها في الدرس سؤالاً مقالياً، فقم فوراً بتحويله إلى اختيار من متعدد ("type": "mcq") مع 4 خيارات ملائمة أو سؤال صح/خطأ (Y/N) بخيارات بلغة المادة الأصلية.
-           - لا تُبقِ على نوع "short_answer" إلا للأسئلة التي يقتضي سياق المادة والدرس صراحة كونها أسئلة مقالية أو شفوية تتطلب إجابة كتابية مفتوحة (مثل أسئلة "علل"، "اذكر السبب"، "بم تفسر"، أو التمارين المقالية المحددة في الدرس).
-        2. هل سقط أي سؤال أو جزء تعليمي سهواً من المادة؟ إذا نعم، أضفه فوراً بالنوع الملائم لسياق المادة (غالباً mcq أو صح/خطأ إلا إذا كان مقالياً في الأصل).
+           - حافظ على مزيج فعلي من "mcq" و "fill_blank" و "short_answer". لا تحوّل كل أسئلة الشرح والتعليل إلى اختيار من متعدد لمجرد أن المادة الأصلية نص عادي.
+           - أسئلة التعليل والمقارنة والشرح تصلح للإجابة القصيرة، والمصطلحات والتعريفات لإكمال الفراغ. إذا كانت المسودة كلها اختياراً من متعدد، أعد صياغة أسئلة مناسبة كإكمال فراغ وإجابات قصيرة دون تغيير حقائق المادة.
+           - في 6 أسئلة أو أكثر استهدف تقريباً 50% اختياراً من متعدد و30% إكمال فراغ و20% إجابة قصيرة، مع سؤال واحد على الأقل من كل نوع عندما تدعم المادة ذلك؛ في 3–5 أسئلة اجمع الأنواع الثلاثة حيث يناسب.
+        2. هل سقط أي سؤال أو جزء تعليمي سهواً من المادة؟ إذا نعم، أضفه فوراً بالنوع الملائم لسياق المادة مع الحفاظ على التنوع.
         3. التدقيق حسب النوع:
            - لأسئلة الاختيار من متعدد وصح/خطأ ("type": "mcq"): تأكد أن حقل "correct" دقيق ومطابق 100% والخيارات صحيحة وواضحة (وإذا كان صح/خطأ فالخيارات بلغة المادة الأصلية).
            - لأسئلة الإجابة القصيرة ("type": "short_answer"): تأكد أن الإجابة النموذجية "expectedAnswer" نموذجية، دقيقة، علمية، وموجزة ومطابقة للمادة تماماً.
@@ -2938,7 +2974,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         cancelQuizInteraction();
         if (soundEnabled) playClick();
         const source = questionsData.length > 0 ? questionsData : allOriginalQuestions;
-        const shuffled = [...source].sort(() => Math.random() - 0.5);
+        const shuffled = prepareQuizQuestions(source);
         setShuffledQuestions(shuffled);
         setCurrentIndex(0);
         setScore(0);
@@ -3363,7 +3399,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         cancelQuizInteraction();
         if (soundEnabled) { initAudio(); playClick(); }
         const source = questionsData.length > 0 ? questionsData : allOriginalQuestions;
-        const shuffled = [...source].sort(() => Math.random() - 0.5);
+        const shuffled = prepareQuizQuestions(source);
         setShuffledQuestions(shuffled);
         setMode('quiz');
         setCurrentIndex(0);
@@ -5974,7 +6010,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                           <button 
                             onClick={() => {
                               setQuestionsData(wrongQuestions);
-                              const reshuffled = [...wrongQuestions].sort(() => Math.random() - 0.5);
+                              const reshuffled = prepareQuizQuestions(wrongQuestions);
                               setShuffledQuestions(reshuffled);
                               setCurrentIndex(0);
                               setScore(0);
@@ -6020,7 +6056,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                         onClick={() => {
                           const full = allOriginalQuestions.length ? allOriginalQuestions : questionsData;
                           setQuestionsData(full);
-                          const reshuffled = [...full].sort(() => Math.random() - 0.5);
+                          const reshuffled = prepareQuizQuestions(full);
                           setShuffledQuestions(reshuffled);
                           setCurrentIndex(0);
                           setScore(0);
