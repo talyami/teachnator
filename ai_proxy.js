@@ -128,7 +128,7 @@ async function handleAiGenerate(user, requestBody) {
   };
 }
 
-module.exports = { handleAiGenerate };
+module.exports = { handleAiGenerate, SETTINGS_KEYS };
 
 function convertParts(parts, textOnly = false) {
   if (!Array.isArray(parts) || !parts.length) throw fail(400, 'يجب إرسال أجزاء محتوى صالحة.');

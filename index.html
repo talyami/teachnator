@@ -319,6 +319,31 @@
       'أدخل مفتاح Gemini المركزي (AIzaSy...)': 'Enter the central Gemini key (AIzaSy...)',
       'حفظ في السيرفر': 'Save on server',
       'فحص الاتصال': 'Test connection',
+      'المستخدمون والإحصائيات': 'Users & Statistics',
+      'إعدادات الذكاء الاصطناعي والمفاتيح': 'AI Settings & Keys',
+      'إعدادات ومفاتيح الذكاء الاصطناعي (Database)': 'AI Settings & Keys (Database)',
+      'يتم حفظ هذه البيانات مباشرة وبأمان تام داخل جدول admin_settings في قاعدة بيانات السيرفر (MySQL).': 'These settings are securely saved in the admin_settings table in MySQL.',
+      'المخ العصبي وتوليد الأسئلة (Brain / OmniRoute)': 'Brain & Question Generation (OmniRoute)',
+      'رابط الخدمة (Base URL):': 'Service URL (Base URL):',
+      'مفتاح API الخاص بـ OmniRoute:': 'OmniRoute API Key:',
+      'اسم النموذج (Model):': 'Model name:',
+      'نطق الأسئلة والمساعد الصوتي (TTS / Voice):': 'Question Voice & TTS:',
+      'مزود خدمة الصوت:': 'Voice provider:',
+      'مفتاح Gemini API (للصوت):': 'Gemini API Key (for Voice):',
+      'إعدادات Vertex AI (Google Cloud):': 'Vertex AI Settings (Google Cloud):',
+      'معرف المشروع (Project ID):': 'Project ID:',
+      'المنطقة (Region):': 'Region:',
+      'مفتاح أو رمز الوصول (Key / Bearer Token):': 'Key or Bearer Token:',
+      'نموذج الصوت (Voice Model):': 'Voice Model:',
+      'شخصية الصوت (Voice Persona):': 'Voice Persona:',
+      'فحص اتصال المخ العصبي': 'Test Brain Connection',
+      'فحص اتصال الصوت': 'Test Voice Connection',
+      'جاري فحص الاتصال...': 'Testing connection...',
+      'حفظ إعدادات الذكاء الاصطناعي في قاعدة البيانات (MySQL)': 'Save AI Settings to Database (MySQL)',
+      'جاري الحفظ في MySQL...': 'Saving to MySQL...',
+      'تم حفظ وتحديث إعدادات الذكاء الاصطناعي بنجاح في قاعدة البيانات ✅': 'AI settings saved and updated successfully in database ✅',
+      'متصل بالمخ بنجاح ({latency}ms) 🧠 رد النموذج: {resp}': 'Connected to Brain ({latency}ms) 🧠 Model response: {resp}',
+      'متصل بخدمة الصوت بنجاح ({latency}ms) 🎙️': 'Connected to Voice service ({latency}ms) 🎙️',
       'إدارة المستخدمين ومنح صلاحيات السيرفر': 'Manage users and grant server access',
       'المستخدم': 'User',
       'الحساب': 'Account',
@@ -1995,11 +2020,30 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
       const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
       const [currentMaterialId, setCurrentMaterialId] = useState(null);
 
-      // إحصائيات وقائمة مستخدمي لوحة المشرف
+      // إحصائيات وقائمة مستخدمي لوحة المشرف وإعدادات الذكاء الاصطناعي
+      const [adminTab, setAdminTab] = useState('users'); // 'users' | 'ai_settings'
       const [adminUsers, setAdminUsers] = useState([]);
       const [adminStats, setAdminStats] = useState(null);
       const [isLoadingAdmin, setIsLoadingAdmin] = useState(false);
       const [adminSearch, setAdminSearch] = useState('');
+      const [adminAiSettings, setAdminAiSettings] = useState({
+        server_brain_url: 'https://srv875806.tail759794.ts.net:10000/v1',
+        server_brain_api_key: '',
+        server_brain_model: 'combo-gemini-flash',
+        server_tts_provider: 'gemini',
+        server_gemini_api_key: '',
+        server_tts_model: 'gemini-2.5-flash-preview-tts',
+        server_tts_voice: 'Aoede',
+        server_vertex_config: { project: '', region: 'global', key: '' }
+      });
+      const [isLoadingAiSettings, setIsLoadingAiSettings] = useState(false);
+      const [isSavingAiSettings, setIsSavingAiSettings] = useState(false);
+      const [aiSettingsSaveMsg, setAiSettingsSaveMsg] = useState('');
+      const [testingAi, setTestingAi] = useState(null); // 'brain' | 'tts' | null
+      const [aiTestResult, setAiTestResult] = useState(null); // { type, success, message, latency }
+      const [showBrainKey, setShowBrainKey] = useState(false);
+      const [showGeminiKey, setShowGeminiKey] = useState(false);
+      const [showVertexKey, setShowVertexKey] = useState(false);
       // فحص الجلسة الحالية عند تحميل الصفحة
       const checkAuthSession = async (tokenToCheck) => {
         const t = tokenToCheck || authToken;
@@ -2212,6 +2256,112 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         }
       };
 
+      // جلب إعدادات ومفاتيح الذكاء الاصطناعي للمشرف
+      const fetchAdminAiSettings = async () => {
+        if (!authToken || currentUser?.role !== 'admin') return;
+        setIsLoadingAiSettings(true);
+        try {
+          const res = await fetch(getApiUrl('/api/admin/ai-settings'), {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          });
+          const d = await res.json();
+          if (d.success && d.settings) {
+            let vertexConf = { project: '', region: 'global', key: '' };
+            try {
+              if (d.settings.server_vertex_config) {
+                vertexConf = typeof d.settings.server_vertex_config === 'string'
+                  ? JSON.parse(d.settings.server_vertex_config)
+                  : d.settings.server_vertex_config;
+              }
+            } catch (_) {}
+            setAdminAiSettings({
+              server_brain_url: d.settings.server_brain_url || 'https://srv875806.tail759794.ts.net:10000/v1',
+              server_brain_api_key: d.settings.server_brain_api_key || '',
+              server_brain_model: d.settings.server_brain_model || 'combo-gemini-flash',
+              server_tts_provider: d.settings.server_tts_provider || 'gemini',
+              server_gemini_api_key: d.settings.server_gemini_api_key || '',
+              server_tts_model: d.settings.server_tts_model || 'gemini-2.5-flash-preview-tts',
+              server_tts_voice: d.settings.server_tts_voice || 'Aoede',
+              server_vertex_config: vertexConf || { project: '', region: 'global', key: '' }
+            });
+          }
+        } catch (e) {
+          console.error('Fetch AI settings error:', e);
+        } finally {
+          setIsLoadingAiSettings(false);
+        }
+      };
+
+      // حفظ إعدادات الذكاء الاصطناعي في قاعدة البيانات
+      const handleSaveAiSettings = async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (!authToken || currentUser?.role !== 'admin') return;
+        setIsSavingAiSettings(true);
+        setAiSettingsSaveMsg('');
+        try {
+          const res = await fetch(getApiUrl('/api/admin/ai-settings'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({
+              settings: {
+                ...adminAiSettings,
+                server_vertex_config: JSON.stringify(adminAiSettings.server_vertex_config || {})
+              }
+            })
+          });
+          const d = await res.json();
+          if (d.success) {
+            setAiSettingsSaveMsg(d.message || t('تم حفظ وتحديث إعدادات الذكاء الاصطناعي بنجاح في قاعدة البيانات ✅'));
+            setTimeout(() => setAiSettingsSaveMsg(''), 5000);
+          } else {
+            alert(translateUi('فشل الحفظ:') + ' ' + (d.message || ''));
+          }
+        } catch (e) {
+          alert(translateUi('فشل الحفظ:') + ' ' + translateUiError(e.message));
+        } finally {
+          setIsSavingAiSettings(false);
+        }
+      };
+
+      // فحص اتصال الذكاء الاصطناعي الفوري
+      const handleTestAiConnection = async (type) => {
+        if (!authToken || currentUser?.role !== 'admin') return;
+        setTestingAi(type);
+        setAiTestResult(null);
+        try {
+          const res = await fetch(getApiUrl('/api/admin/ai-test'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ type })
+          });
+          const d = await res.json();
+          setAiTestResult({
+            type,
+            success: d.success,
+            latency: d.latency,
+            message: d.success 
+              ? (type === 'brain' 
+                  ? t('متصل بالمخ بنجاح ({latency}ms) 🧠 رد النموذج: {resp}', { latency: d.latency, resp: d.response || 'OK' })
+                  : t('متصل بخدمة الصوت بنجاح ({latency}ms) 🎙️', { latency: d.latency }))
+              : (d.message || t('فشل الاتصال'))
+          });
+        } catch (e) {
+          setAiTestResult({
+            type,
+            success: false,
+            message: translateUiError(e.message)
+          });
+        } finally {
+          setTestingAi(null);
+        }
+      };
+
       // جلب بيانات لوحة تحكم المشرف (Admin Dashboard)
       const fetchAdminData = async () => {
         if (!authToken || currentUser?.role !== 'admin') return;
@@ -2219,11 +2369,12 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         try {
           const [statsRes, usersRes] = await Promise.all([
             fetch(getApiUrl('/api/admin/stats'), { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()),
-            fetch(getApiUrl(`/api/admin/users${adminSearch ? `?search=${encodeURIComponent(adminSearch)}` : ''}`), { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json())
+            fetch(getApiUrl(`/api/admin/users${adminSearch ? `?search=${encodeURIComponent(adminSearch)}` : ''}`), { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()),
+            fetchAdminAiSettings()
           ]);
 
-          if (statsRes.success) setAdminStats(statsRes.stats);
-          if (usersRes.success) setAdminUsers(usersRes.users);
+          if (statsRes && statsRes.success) setAdminStats(statsRes.stats);
+          if (usersRes && usersRes.success) setAdminUsers(usersRes.users);
         } catch (e) {
           console.error('Fetch admin data error:', e);
         } finally {
@@ -4113,113 +4264,394 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                   </button>
                 </div>
 
+                {/* Navigation Tabs */}
+                <div className="flex border-b border-slate-200 bg-slate-50 px-6 pt-3 gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setAdminTab('users')}
+                    className={`pb-3 px-4 font-black text-xs sm:text-sm flex items-center gap-2 border-b-2 transition cursor-pointer ${
+                      adminTab === 'users'
+                        ? 'border-amber-500 text-amber-800 bg-white rounded-t-xl shadow-xs'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <i className="fa-solid fa-users"></i>
+                    <span>{t('المستخدمون والإحصائيات')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAdminTab('ai_settings'); fetchAdminAiSettings(); }}
+                    className={`pb-3 px-4 font-black text-xs sm:text-sm flex items-center gap-2 border-b-2 transition cursor-pointer ${
+                      adminTab === 'ai_settings'
+                        ? 'border-indigo-600 text-indigo-700 bg-white rounded-t-xl shadow-xs'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <i className="fa-solid fa-brain text-indigo-500"></i>
+                    <span>{t('إعدادات الذكاء الاصطناعي والمفاتيح')}</span>
+                  </button>
+                </div>
+
                 {/* Body Content */}
                 <div className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-800">
-                  {/* Stats Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-                      <p className="text-xs text-slate-500 font-bold mb-1">{t('إجمالي المستخدمين')}</p>
-                      <p className="text-2xl font-black text-slate-800">{adminStats?.totalUsers ?? adminUsers.length}</p>
-                    </div>
-                    <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-center">
-                      <p className="text-xs text-emerald-600 font-bold mb-1">{t('صلاحية AI نشطة')}</p>
-                      <p className="text-2xl font-black text-emerald-700">{adminStats?.serverAiUsers ?? adminUsers.filter(u => u.has_server_ai_access).length}</p>
-                    </div>
-                    <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-200 text-center">
-                      <p className="text-xs text-indigo-600 font-bold mb-1">{t('طلبات AI المنفذة')}</p>
-                      <p className="text-2xl font-black text-indigo-700">{adminStats?.totalAiCalls ?? 0}</p>
-                    </div>
-                    <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-center">
-                      <p className="text-xs text-amber-600 font-bold mb-1">{t('المواد المحفوظة')}</p>
-                      <p className="text-2xl font-black text-amber-700">{adminStats?.totalMaterials ?? 0}</p>
-                    </div>
-                  </div>
+                  {adminTab === 'users' && (
+                    <div className="space-y-6">
+                      {/* Stats Cards */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center">
+                          <p className="text-xs text-slate-500 font-bold mb-1">{t('إجمالي المستخدمين')}</p>
+                          <p className="text-2xl font-black text-slate-800">{adminStats?.totalUsers ?? adminUsers.length}</p>
+                        </div>
+                        <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-center">
+                          <p className="text-xs text-emerald-600 font-bold mb-1">{t('صلاحية AI نشطة')}</p>
+                          <p className="text-2xl font-black text-emerald-700">{adminStats?.serverAiUsers ?? adminUsers.filter(u => u.has_server_ai_access).length}</p>
+                        </div>
+                        <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-200 text-center">
+                          <p className="text-xs text-indigo-600 font-bold mb-1">{t('طلبات AI المنفذة')}</p>
+                          <p className="text-2xl font-black text-indigo-700">{adminStats?.totalAiCalls ?? 0}</p>
+                        </div>
+                        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-center">
+                          <p className="text-xs text-amber-600 font-bold mb-1">{t('المواد المحفوظة')}</p>
+                          <p className="text-2xl font-black text-amber-700">{adminStats?.totalMaterials ?? 0}</p>
+                        </div>
+                      </div>
 
+                      {/* Users Table & AI Access Management */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-black text-slate-800 text-base flex items-center gap-2">
+                            <i className="fa-solid fa-users-gear text-amber-600"></i>
+                            {t('إدارة المستخدمين ومنح صلاحيات السيرفر')}
+                          </h4>
+                          <button
+                            onClick={fetchAdminData}
+                            className="text-xs text-amber-600 hover:text-amber-800 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <i className="fa-solid fa-arrows-rotate"></i>
+                            {t('تحديث القائمة')}
+                          </button>
+                        </div>
 
-                  {/* Users Table & AI Access Management */}
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="font-black text-slate-800 text-base flex items-center gap-2">
-                        <i className="fa-solid fa-users-gear text-amber-600"></i>
-                        {t('إدارة المستخدمين ومنح صلاحيات السيرفر')}
-                      </h4>
-                      <button
-                        onClick={fetchAdminUsers}
-                        className="text-xs text-amber-600 hover:text-amber-800 font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        <i className="fa-solid fa-arrows-rotate"></i>
-                        {t('تحديث القائمة')}
-                      </button>
-                    </div>
-
-                    <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                      <table className="w-full text-right text-xs">
-                        <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
-                          <tr>
-                            <th className="p-3">{t('المستخدم')}</th>
-                            <th className="p-3">{t('الحساب')}</th>
-                            <th className="p-3 text-center">{t('طلبات AI')}</th>
-                            <th className="p-3 text-center">{t('المواد المحفوظة')}</th>
-                            <th className="p-3 text-center">{t('صلاحية AI السيرفر')}</th>
-                            <th className="p-3 text-center">{t('الإجراء')}</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {adminUsers.map((u) => {
-                            const hasAi = u.has_server_ai_access === 1;
-                            const isAdmin = u.role === 'admin';
-
-                            return (
-                              <tr key={u.id} className="hover:bg-slate-50/70 transition">
-                                <td className="p-3">
-                                  <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                                    {isAdmin && <i className="fa-solid fa-crown text-amber-500 text-[10px]"></i>}
-                                    <span dir="auto">{u.name || t('بدون اسم')}</span>
-                                  </div>
-                                  <div dir="auto" className="text-[11px] text-slate-400">{u.email}</div>
-                                </td>
-                                <td className="p-3">
-                                  <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-semibold">
-                                    {u.provider || 'local'}
-                                  </span>
-                                </td>
-                                <td className="p-3 text-center font-bold text-slate-700">
-                                  {u.ai_calls_count || 0}
-                                </td>
-                                <td className="p-3 text-center font-bold text-slate-700">
-                                  {u.materials_count || 0}
-                                </td>
-                                <td className="p-3 text-center">
-                                  {hasAi || isAdmin ? (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
-                                      <i className="fa-solid fa-check"></i>
-                                      {t('ممنوح')}
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-500 rounded-full font-bold text-[10px]">
-                                      {t('محجوب')}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="p-3 text-center">
-                                  <button
-                                    onClick={() => handleToggleUserAi(u.id)}
-                                    className={`px-3 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer shadow-2xs ${
-                                      hasAi
-                                        ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
-                                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                    }`}
-                                  >
-                                    {hasAi ? t('سحب الصلاحية') : t('منح AI السيرفر')}
-                                  </button>
-                                </td>
+                        <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                          <table className="w-full text-right text-xs">
+                            <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+                              <tr>
+                                <th className="p-3">{t('المستخدم')}</th>
+                                <th className="p-3">{t('الحساب')}</th>
+                                <th className="p-3 text-center">{t('طلبات AI')}</th>
+                                <th className="p-3 text-center">{t('المواد المحفوظة')}</th>
+                                <th className="p-3 text-center">{t('صلاحية AI السيرفر')}</th>
+                                <th className="p-3 text-center">{t('الإجراء')}</th>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {adminUsers.map((u) => {
+                                const hasAi = u.has_server_ai_access === 1;
+                                const isAdmin = u.role === 'admin';
+
+                                return (
+                                  <tr key={u.id} className="hover:bg-slate-50/70 transition">
+                                    <td className="p-3">
+                                      <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                                        {isAdmin && <i className="fa-solid fa-crown text-amber-500 text-[10px]"></i>}
+                                        <span dir="auto">{u.name || t('بدون اسم')}</span>
+                                      </div>
+                                      <div dir="auto" className="text-[11px] text-slate-400">{u.email}</div>
+                                    </td>
+                                    <td className="p-3">
+                                      <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                                        {u.provider || 'local'}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-center font-bold text-slate-700">
+                                      {u.ai_calls_count || 0}
+                                    </td>
+                                    <td className="p-3 text-center font-bold text-slate-700">
+                                      {u.materials_count || 0}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      {hasAi || isAdmin ? (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
+                                          <i className="fa-solid fa-check"></i>
+                                          {t('ممنوح')}
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-500 rounded-full font-bold text-[10px]">
+                                          {t('محجوب')}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      <button
+                                        onClick={() => handleToggleUserAiAccess(u.id, hasAi)}
+                                        className={`px-3 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer shadow-2xs ${
+                                          hasAi
+                                            ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                                            : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                        }`}
+                                      >
+                                        {hasAi ? t('سحب الصلاحية') : t('منح AI السيرفر')}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {adminTab === 'ai_settings' && (
+                    <div className="space-y-6">
+                      {/* Top notice banner */}
+                      <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl flex items-start gap-3">
+                        <i className="fa-solid fa-shield-halved text-indigo-600 text-lg mt-0.5"></i>
+                        <div className="text-xs text-indigo-950 space-y-1">
+                          <p className="font-bold">{t('إعدادات ومفاتيح الذكاء الاصطناعي (Database)')}</p>
+                          <p className="text-indigo-800 leading-relaxed">{t('يتم حفظ هذه البيانات مباشرة وبأمان تام داخل جدول admin_settings في قاعدة بيانات السيرفر (MySQL).')}</p>
+                        </div>
+                      </div>
+
+                      {/* Section 1: Brain (OmniRoute) */}
+                      <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-3 flex-wrap gap-2">
+                          <h4 className="font-black text-slate-800 text-sm flex items-center gap-2">
+                            <i className="fa-solid fa-microchip text-indigo-600"></i>
+                            {t('المخ العصبي وتوليد الأسئلة (Brain / OmniRoute)')}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => handleTestAiConnection('brain')}
+                            disabled={testingAi === 'brain'}
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                          >
+                            <i className={`fa-solid ${testingAi === 'brain' ? 'fa-spinner fa-spin' : 'fa-bolt'}`}></i>
+                            <span>{testingAi === 'brain' ? t('جاري فحص الاتصال...') : t('فحص اتصال المخ العصبي')}</span>
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                          <div className="sm:col-span-2">
+                            <label className="block font-bold text-slate-700 mb-1">{t('رابط الخدمة (Base URL):')}</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={adminAiSettings.server_brain_url}
+                              onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_brain_url: e.target.value }))}
+                              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                              placeholder="https://srv875806.tail759794.ts.net:10000/v1"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1">{t('مفتاح API الخاص بـ OmniRoute:')}</label>
+                            <div className="relative">
+                              <input
+                                type={showBrainKey ? "text" : "password"}
+                                dir="ltr"
+                                value={adminAiSettings.server_brain_api_key}
+                                onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_brain_api_key: e.target.value }))}
+                                className="w-full pl-3 pr-9 py-2 bg-white border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                placeholder="sk-..."
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowBrainKey(!showBrainKey)}
+                                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                              >
+                                <i className={`fa-solid ${showBrainKey ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                              </button>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1">{t('اسم النموذج (Model):')}</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={adminAiSettings.server_brain_model}
+                              onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_brain_model: e.target.value }))}
+                              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                              placeholder="combo-gemini-flash"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Section 2: Voice TTS */}
+                      <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-3 flex-wrap gap-2">
+                          <h4 className="font-black text-slate-800 text-sm flex items-center gap-2">
+                            <i className="fa-solid fa-headset text-amber-600"></i>
+                            {t('نطق الأسئلة والمساعد الصوتي (TTS / Voice):')}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => handleTestAiConnection('tts')}
+                            disabled={testingAi === 'tts'}
+                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                          >
+                            <i className={`fa-solid ${testingAi === 'tts' ? 'fa-spinner fa-spin' : 'fa-volume-high'}`}></i>
+                            <span>{testingAi === 'tts' ? t('جاري فحص الاتصال...') : t('فحص اتصال الصوت')}</span>
+                          </button>
+                        </div>
+
+                        <div className="space-y-4 text-xs">
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1">{t('مزود خدمة الصوت:')}</label>
+                            <div className="grid grid-cols-2 gap-2 bg-slate-200/70 p-1 rounded-xl max-w-xs font-bold">
+                              <button
+                                type="button"
+                                onClick={() => setAdminAiSettings(prev => ({ ...prev, server_tts_provider: 'gemini' }))}
+                                className={`py-2 rounded-lg transition ${adminAiSettings.server_tts_provider === 'gemini' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                              >
+                                Google Gemini TTS
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setAdminAiSettings(prev => ({ ...prev, server_tts_provider: 'vertex' }))}
+                                className={`py-2 rounded-lg transition ${adminAiSettings.server_tts_provider === 'vertex' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                              >
+                                Google Vertex AI
+                              </button>
+                            </div>
+                          </div>
+
+                          {adminAiSettings.server_tts_provider === 'gemini' ? (
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">{t('مفتاح Gemini API (للصوت):')}</label>
+                              <div className="relative">
+                                <input
+                                  type={showGeminiKey ? "text" : "password"}
+                                  dir="ltr"
+                                  value={adminAiSettings.server_gemini_api_key}
+                                  onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_gemini_api_key: e.target.value }))}
+                                  className="w-full pl-3 pr-9 py-2 bg-white border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                  placeholder="AIzaSy..."
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowGeminiKey(!showGeminiKey)}
+                                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                                >
+                                  <i className={`fa-solid ${showGeminiKey ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-3">
+                              <p className="font-bold text-slate-700">{t('إعدادات Vertex AI (Google Cloud):')}</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block text-slate-600 mb-1">{t('معرف المشروع (Project ID):')}</label>
+                                  <input
+                                    type="text"
+                                    dir="ltr"
+                                    value={adminAiSettings.server_vertex_config?.project || ''}
+                                    onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_vertex_config: { ...prev.server_vertex_config, project: e.target.value } }))}
+                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs"
+                                    placeholder="my-gcp-project"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 mb-1">{t('المنطقة (Region):')}</label>
+                                  <input
+                                    type="text"
+                                    dir="ltr"
+                                    value={adminAiSettings.server_vertex_config?.region || 'global'}
+                                    onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_vertex_config: { ...prev.server_vertex_config, region: e.target.value } }))}
+                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs"
+                                    placeholder="global"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-slate-600 mb-1">{t('مفتاح أو رمز الوصول (Key / Bearer Token):')}</label>
+                                  <div className="relative">
+                                    <input
+                                      type={showVertexKey ? "text" : "password"}
+                                      dir="ltr"
+                                      value={adminAiSettings.server_vertex_config?.key || ''}
+                                      onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_vertex_config: { ...prev.server_vertex_config, key: e.target.value } }))}
+                                      className="w-full pl-2.5 pr-8 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs"
+                                      placeholder="API Key or token"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowVertexKey(!showVertexKey)}
+                                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600"
+                                    >
+                                      <i className={`fa-solid ${showVertexKey ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">{t('نموذج الصوت (Voice Model):')}</label>
+                              <input
+                                type="text"
+                                dir="ltr"
+                                value={adminAiSettings.server_tts_model}
+                                onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_tts_model: e.target.value }))}
+                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                placeholder="gemini-2.5-flash-preview-tts"
+                              />
+                            </div>
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">{t('شخصية الصوت (Voice Persona):')}</label>
+                              <select
+                                value={adminAiSettings.server_tts_voice}
+                                onChange={(e) => setAdminAiSettings(prev => ({ ...prev, server_tts_voice: e.target.value }))}
+                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                              >
+                                <option value="Aoede">Aoede 🎙️ (صوت سعودي ودي ومحفز - افتراضي)</option>
+                                <option value="Puck">Puck 🎙️ (صوت حيوي وسريع)</option>
+                                <option value="Charon">Charon 🎙️ (صوت عميق ورصين)</option>
+                                <option value="Kore">Kore 🎙️ (صوت هادئ ومريح)</option>
+                                <option value="Fenrir">Fenrir 🎙️ (صوت قوي وواثق)</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Test Result Display */}
+                      {aiTestResult && (
+                        <div className={`p-4 rounded-2xl border text-xs leading-relaxed flex items-center gap-3 animate-in fade-in duration-200 ${
+                          aiTestResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-rose-50 border-rose-300 text-rose-900'
+                        }`}>
+                          <i className={`fa-solid text-base ${aiTestResult.success ? 'fa-circle-check text-emerald-600' : 'fa-circle-xmark text-rose-600'}`}></i>
+                          <div className="flex-1 font-bold">{aiTestResult.message}</div>
+                        </div>
+                      )}
+
+                      {/* Success message banner */}
+                      {aiSettingsSaveMsg && (
+                        <div className="p-3 bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-bold flex items-center gap-2">
+                          <i className="fa-solid fa-check"></i>
+                          <span>{aiSettingsSaveMsg}</span>
+                        </div>
+                      )}
+
+                      {/* Save button */}
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={handleSaveAiSettings}
+                          disabled={isSavingAiSettings}
+                          className="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 disabled:opacity-50 text-white font-black text-sm rounded-2xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <i className={`fa-solid ${isSavingAiSettings ? 'fa-spinner fa-spin' : 'fa-floppy-disk'}`}></i>
+                          <span>{isSavingAiSettings ? t('جاري الحفظ في MySQL...') : t('حفظ إعدادات الذكاء الاصطناعي في قاعدة البيانات (MySQL)')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer */}

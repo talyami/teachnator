@@ -13,7 +13,7 @@ const {
   requireAuth,
   requireAdmin
 } = require('./auth');
-const { handleAiGenerate } = require('./ai_proxy');
+const { handleAiGenerate, SETTINGS_KEYS } = require('./ai_proxy');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -543,6 +543,84 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     res.json({ success: true, message: 'تم حذف المستخدم وجميع بياناته بنجاح' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// جلب إعدادات ومفاتيح الذكاء الاصطناعي للمشرف
+app.get('/api/admin/ai-settings', requireAdmin, async (req, res) => {
+  try {
+    const rows = await query(
+      `SELECT setting_key, setting_value FROM admin_settings WHERE setting_key IN (${SETTINGS_KEYS.map(() => '?').join(',')})`,
+      SETTINGS_KEYS
+    );
+    const settings = {};
+    for (const row of rows) {
+      settings[row.setting_key] = row.setting_value;
+    }
+    res.json({ success: true, settings });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// حفظ وتحديث إعدادات ومفاتيح الذكاء الاصطناعي في قاعدة البيانات
+app.post('/api/admin/ai-settings', requireAdmin, async (req, res) => {
+  try {
+    const { settings } = req.body || {};
+    if (!settings || typeof settings !== 'object') {
+      return res.status(400).json({ success: false, message: 'بيانات الإعدادات غير صالحة' });
+    }
+
+    for (const key of SETTINGS_KEYS) {
+      if (settings[key] !== undefined) {
+        const val = typeof settings[key] === 'object' ? JSON.stringify(settings[key]) : String(settings[key] || '');
+        await query(
+          'INSERT INTO admin_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()',
+          [key, val]
+        );
+      }
+    }
+
+    res.json({ success: true, message: 'تم حفظ وتحديث إعدادات الذكاء الاصطناعي بنجاح في قاعدة البيانات ✅' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// فحص اتصال الذكاء الاصطناعي فوري للمشرف
+app.post('/api/admin/ai-test', requireAdmin, async (req, res) => {
+  const { type = 'brain' } = req.body || {};
+  const start = Date.now();
+  try {
+    if (type === 'brain') {
+      const result = await handleAiGenerate(req.user, {
+        purpose: 'brain',
+        payload: {
+          contents: [{ role: 'user', parts: [{ text: 'Test connection: reply with OK.' }] }],
+          generationConfig: { maxOutputTokens: 10 }
+        }
+      });
+      const latency = Date.now() - start;
+      const responseText = result?.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      return res.json({ success: true, latency, response: responseText.trim() });
+    } else if (type === 'tts') {
+      const result = await handleAiGenerate(req.user, {
+        purpose: 'tts',
+        payload: {
+          contents: [{ role: 'user', parts: [{ text: 'مرحباً، تم فحص الصوت بنجاح.' }] }]
+        }
+      });
+      const latency = Date.now() - start;
+      const hasAudio = Boolean(result?.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data);
+      return res.json({ success: true, latency, hasAudio });
+    }
+    res.status(400).json({ success: false, message: 'نوع الاختبار غير صالح' });
+  } catch (err) {
+    res.status(err.status || 500).json({
+      success: false,
+      message: err.message || 'فشل الاتصال بمزود الذكاء الاصطناعي',
+      latency: Date.now() - start
+    });
   }
 });
 
