@@ -107,6 +107,31 @@ async function initDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // A separate durable lifetime ledger survives material deletion. INSERT IGNORE
+    // migrates historical usage exactly once, including databases restarted later.
+    await p.query(`CREATE TABLE IF NOT EXISTS material_quota_accounts (
+      owner_key VARCHAR(80) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+      material_limit INT UNSIGNED NULL DEFAULT 1,
+      materials_used INT UNSIGNED NOT NULL DEFAULT 0,
+      pending_generation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL
+    ) ENGINE=InnoDB`);
+    await p.query(`CREATE TABLE IF NOT EXISTS material_generations (
+      id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+      owner_key VARCHAR(80) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+      user_id INT NULL,
+      state VARCHAR(16) NOT NULL DEFAULT 'pending',
+      draft_state VARCHAR(16) NOT NULL DEFAULT 'idle',
+      revise_state VARCHAR(16) NOT NULL DEFAULT 'idle',
+      charged TINYINT(1) NOT NULL DEFAULT 0,
+      material_id INT NULL,
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_generation_owner (owner_key)
+    ) ENGINE=InnoDB`);
+    await p.query(`INSERT IGNORE INTO material_quota_accounts (owner_key, materials_used)
+      SELECT CONCAT('user:', u.id), COUNT(m.id) FROM users u
+      LEFT JOIN materials m ON m.user_id = u.id GROUP BY u.id`);
+
     // Environment values bootstrap missing rows only. Subsequent changes belong in MySQL.
     const defaults = {
       server_brain_url: process.env.SERVER_BRAIN_URL || 'https://srv875806.tail759794.ts.net:10000/v1',
@@ -149,7 +174,29 @@ async function query(sql, params = []) {
   return rows;
 }
 
+// All statements in a quota mutation use one connection and one transaction.
+async function transaction(work) {
+  if (!isDbConnected) throw new Error('Database unavailable.');
+  const connection = await getPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const txQuery = async (sql, params = []) => {
+      const [rows] = await connection.query(sql, params);
+      return rows;
+    };
+    const result = await work(txQuery);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 module.exports = {
+  transaction,
   getPool,
   initDb,
   query,

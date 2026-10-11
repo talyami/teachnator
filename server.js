@@ -14,6 +14,19 @@ const {
   requireAdmin
 } = require('./auth');
 const { handleAiGenerate, SETTINGS_KEYS } = require('./ai_proxy');
+const materialQuota = require('./material_quota');
+const quotaOwner = req => materialQuota.ownerFor(req.user, req.get('X-Guest-Device'));
+const publicUser = (user, quota) => ({
+  id: user.id, email: user.email, name: user.name, avatar: user.avatar,
+  role: user.role, auth_provider: user.auth_provider,
+  has_server_ai_access: user.role === 'admin' || quota.materialLimit === null || quota.remaining > 0,
+  ai_calls_count: user.ai_calls_count,
+  material_limit: quota.materialLimit, materials_used: quota.materialsUsed, quota
+});
+function quotaError(res, error) {
+  const status = [400, 401, 403, 404, 409, 429].includes(error.status) ? error.status : 503;
+  return res.status(status).json({ success: false, message: status === 503 ? 'Material quota service unavailable.' : error.message });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -60,16 +73,7 @@ app.post('/api/auth/google', async (req, res) => {
     res.json({
       success: true,
       token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        avatar: user.avatar,
-        role: user.role,
-        auth_provider: user.auth_provider,
-        has_server_ai_access: user.has_server_ai_access,
-        ai_calls_count: user.ai_calls_count
-      }
+      user: publicUser(user, await materialQuota.read(materialQuota.ownerFor(user)))
     });
   } catch (err) {
     console.error('Google auth error:', err);
@@ -116,16 +120,7 @@ if (process.env.NODE_ENV === 'development') {
       res.json({
         success: true,
         token,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          avatar: user.avatar,
-          role: user.role,
-          auth_provider: user.auth_provider,
-          has_server_ai_access: user.has_server_ai_access,
-          ai_calls_count: user.ai_calls_count
-        }
+        user: publicUser(user, await materialQuota.read(materialQuota.ownerFor(user)))
       });
     } catch (err) {
       console.error('Dev login error:', err);
@@ -139,23 +134,12 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // استعلام بيانات الحساب الحالي (Me)
-app.get('/api/auth/me', (req, res) => {
-  if (!req.user) {
-    return res.json({ authenticated: false, user: null });
-  }
-  res.json({
-    authenticated: true,
-    user: {
-      id: req.user.id,
-      email: req.user.email,
-      name: req.user.name,
-      avatar: req.user.avatar,
-      role: req.user.role,
-      auth_provider: req.user.auth_provider,
-      has_server_ai_access: req.user.has_server_ai_access,
-      ai_calls_count: req.user.ai_calls_count
-    }
-  });
+app.get('/api/auth/me', async (req, res) => {
+  if (!req.user) return res.json({ authenticated: false, user: null });
+  try {
+    const quota = await materialQuota.read(quotaOwner(req));
+    res.json({ authenticated: true, user: publicUser(req.user, quota) });
+  } catch (error) { quotaError(res, error); }
 });
 
 // ==========================================
@@ -193,15 +177,33 @@ function limitAiRequests(req, res, next) {
 // توليد المحتوى أو الاختبارات أو تقييم الإجابات
 app.post('/api/ai/generate', limitAiRequests, async (req, res) => {
   try {
-    const result = await handleAiGenerate(req.user, req.body);
+    const result = await handleAiGenerate(req.user, req.body, { guestDevice: req.get('X-Guest-Device') });
     res.json(result);
   } catch (err) {
-    const status = [400, 403, 429, 502, 503, 504].includes(err.status) ? err.status : 500;
+    const status = [400, 401, 403, 404, 409, 429, 502, 503, 504].includes(err.status) ? err.status : 500;
     res.status(status).json({
       success: false,
       message: status === 500 ? 'حدث خطأ أثناء معالجة طلب الذكاء الاصطناعي' : err.message
     });
   }
+});
+
+// Durable material allowance and owner-bound generation lifecycle.
+app.get('/api/material-quota', async (req, res) => {
+  try { res.json({ success: true, quota: await materialQuota.read(quotaOwner(req)) }); }
+  catch (error) { quotaError(res, error); }
+});
+app.post('/api/material-generations/start', limitAiRequests, async (req, res) => {
+  try { res.json(await materialQuota.start(quotaOwner(req))); }
+  catch (error) { quotaError(res, error); }
+});
+app.post('/api/material-generations/:id/complete', async (req, res) => {
+  try { res.json(await materialQuota.complete(quotaOwner(req), req.params.id, req.body)); }
+  catch (error) { quotaError(res, error); }
+});
+app.delete('/api/material-generations/:id', async (req, res) => {
+  try { res.json(await materialQuota.cancel(quotaOwner(req), req.params.id)); }
+  catch (error) { quotaError(res, error); }
 });
 
 // ==========================================
@@ -229,30 +231,9 @@ app.get('/api/materials', requireAuth, async (req, res) => {
 
 // حفظ مادة دراسية وأسئلتها المولدة
 app.post('/api/materials', requireAuth, async (req, res) => {
-  try {
-    const { title, contentPreview, sourceFilename, questions, totalQuestions } = req.body;
-    if (!title || !questions) {
-      return res.status(400).json({ success: false, message: 'عنوان المادة والأسئلة مطلوبان' });
-    }
-
-    const questionsJson = typeof questions === 'string' ? questions : JSON.stringify(questions);
-    const count = totalQuestions || (Array.isArray(questions) ? questions.length : 0);
-
-    const result = await query(
-      `INSERT INTO materials (user_id, title, content_preview, source_filename, questions_json, total_questions, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [req.user.id, title, contentPreview || '', sourceFilename || '', questionsJson, count]
-    );
-
-    res.json({
-      success: true,
-      materialId: result.insertId,
-      message: 'تم حفظ المادة والأسئلة بنجاح في قاعدة البيانات'
-    });
-  } catch (err) {
-    console.error('Save material error:', err);
-    res.status(500).json({ success: false, message: 'تعذر حفظ المادة: ' + err.message });
-  }
+  // Compatibility alias: never permit an unreserved direct insert.
+  try { res.json(await materialQuota.complete(quotaOwner(req), req.body?.generationId, req.body)); }
+  catch (error) { quotaError(res, error); }
 });
 
 // جلب مادة محددة بكامل أسئلتها للاستئناف أو المراجعة
@@ -459,10 +440,13 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     const search = req.query.search ? `%${req.query.search.trim()}%` : null;
     let sql = `
       SELECT u.id, u.email, u.name, u.avatar, u.auth_provider, u.role, 
-             u.has_server_ai_access, u.ai_calls_count, u.last_login, u.created_at,
+             (u.role = 'admin' OR q.material_limit IS NULL OR q.materials_used < q.material_limit) AS has_server_ai_access,
+             CASE WHEN u.role = 'admin' THEN NULL ELSE q.material_limit END AS material_limit,
+             q.materials_used, u.ai_calls_count, u.last_login, u.created_at,
              COUNT(DISTINCT m.id) as materials_count,
              COUNT(DISTINCT p.id) as progress_count
       FROM users u
+      LEFT JOIN material_quota_accounts q ON q.owner_key = CONCAT('user:', u.id)
       LEFT JOIN materials m ON m.user_id = u.id
       LEFT JOIN user_progress p ON p.user_id = u.id
     `;
@@ -482,32 +466,14 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
   }
 });
 
-// منح أو سحب صلاحية استخدام مفتاح الذكاء الاصطناعي للسيرفر
-app.post('/api/admin/users/:id/toggle-ai', requireAdmin, async (req, res) => {
-  try {
-    const targetUserId = parseInt(req.params.id, 10);
-    const { hasAccess } = req.body;
+app.post('/api/admin/users/:id/material-quota', requireAdmin, async (req, res) => {
+  try { res.json(await materialQuota.setLimit(req.params.id, req.body?.materialLimit)); }
+  catch (error) { quotaError(res, error); }
+});
 
-    const newStatus = hasAccess !== undefined ? (hasAccess ? 1 : 0) : null;
-
-    let updateSql = 'UPDATE users SET has_server_ai_access = ';
-    if (newStatus !== null) {
-      updateSql += '? WHERE id = ?';
-      await query(updateSql, [newStatus, targetUserId]);
-    } else {
-      updateSql += 'IF(has_server_ai_access = 1, 0, 1) WHERE id = ?';
-      await query(updateSql, [targetUserId]);
-    }
-
-    const rows = await query('SELECT id, email, name, has_server_ai_access FROM users WHERE id = ?', [targetUserId]);
-    res.json({
-      success: true,
-      user: rows[0],
-      message: `تم ${rows[0]?.has_server_ai_access ? 'منح' : 'إلغاء'} صلاحية الذكاء الاصطناعي للمستخدم بنجاح`
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+// Legacy binary grants no longer govern access; clients must set a material limit.
+app.post('/api/admin/users/:id/toggle-ai', requireAdmin, (req, res) => {
+  res.status(410).json({ success: false, message: 'Binary AI grants were replaced. Use POST /api/admin/users/:id/material-quota.' });
 });
 
 // ترقية المستخدم أو تغيير رتبته
@@ -588,7 +554,7 @@ app.post('/api/admin/ai-settings', requireAdmin, async (req, res) => {
 });
 
 // فحص اتصال الذكاء الاصطناعي فوري للمشرف
-app.post('/api/admin/ai-test', requireAdmin, async (req, res) => {
+app.post('/api/admin/ai-test', requireAdmin, limitAiRequests, async (req, res) => {
   const { type = 'brain' } = req.body || {};
   const start = Date.now();
   try {
@@ -599,7 +565,7 @@ app.post('/api/admin/ai-test', requireAdmin, async (req, res) => {
           contents: [{ role: 'user', parts: [{ text: 'Test connection: reply with OK.' }] }],
           generationConfig: { maxOutputTokens: 10 }
         }
-      });
+      }, { adminTest: true });
       const latency = Date.now() - start;
       const responseText = result?.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
       return res.json({ success: true, latency, response: responseText.trim() });
@@ -609,7 +575,7 @@ app.post('/api/admin/ai-test', requireAdmin, async (req, res) => {
         payload: {
           contents: [{ role: 'user', parts: [{ text: 'مرحباً، تم فحص الصوت بنجاح.' }] }]
         }
-      });
+      }, { adminTest: true });
       const latency = Date.now() - start;
       const hasAudio = Boolean(result?.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data);
       return res.json({ success: true, latency, hasAudio });

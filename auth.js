@@ -19,8 +19,7 @@ function generateToken(user) {
     {
       id: user.id,
       email: user.email,
-      role: user.role,
-      has_server_ai_access: user.has_server_ai_access
+      role: user.role
     },
     JWT_SECRET,
     { expiresIn: '30d' }
@@ -140,6 +139,7 @@ async function authenticateToken(req, res, next) {
 
   if (!token) {
     req.user = null;
+    if (authHeader) return res.status(401).json({ success: false, message: 'Invalid authorization header.' });
     return next();
   }
 
@@ -150,10 +150,11 @@ async function authenticateToken(req, res, next) {
     if (users.length > 0) {
       req.user = users[0];
     } else {
-      req.user = null;
+      return res.status(401).json({ success: false, message: 'Account no longer exists.' });
     }
   } catch (err) {
     req.user = null;
+    return res.status(401).json({ success: false, message: 'Invalid or unavailable authentication.' });
   }
 
   next();

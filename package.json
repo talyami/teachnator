@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check auth.js && node --check db.js && node --check ai_proxy.js"
+    "check": "node --check server.js && node --check auth.js && node --check db.js && node --check ai_proxy.js && node --check material_quota.js && node --test material_quota.test.js"
   },
   "dependencies": {
     "cors": "^2.8.6",

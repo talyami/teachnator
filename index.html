@@ -76,6 +76,8 @@
     [dir="auto"] { unicode-bidi: plaintext; }
     h2[dir="auto"], p[dir="auto"], .quiz-option-btn[dir="auto"] { text-align: start; }
     [data-material-text] { text-align: start !important; }
+    .quiz-option-btn[data-material-text] { unicode-bidi: isolate; }
+    .quiz-option-btn[data-material-text]:focus-visible { outline: 3px solid #818cf8 !important; outline-offset: 2px; }
     html[dir="ltr"] .ml-auto { margin-left: 0; margin-right: auto; }
     html[dir="ltr"] .float-left { float: right; }
     html[dir="ltr"] .ml-1 { margin-left: 0; margin-right: 0.25rem; }
@@ -186,6 +188,27 @@
 
     // UI-only localization. Source-language keys keep material, prompts and speech untouched.
     const UI_EN = {
+      'حد المواد': 'Material allowance',
+      'جاري التحقق من حد المواد...': 'Checking material allowance...',
+      'المستخدم: {used} • المتبقي: {remaining} • الحد الإجمالي: {limit}': 'Used: {used} • Remaining: {remaining} • Total allowance: {limit}',
+      'حد إجمالي دائم، وليس يومياً. المذاكرة وإعادة الاختبار والصوت وتقييم الإجابات لا تستهلك مواد إضافية.': 'This is a lifetime allowance, not a daily limit. Studying, retaking quizzes, audio and answer evaluation do not use additional materials.',
+      'للضيف مادة واحدة محفوظة على هذا الجهاز. يحدد الخادم الحد؛ مسح التخزين قد يفقد المادة والتقدم.': 'Guests get one material, saved on this device. The server enforces the allowance; clearing storage may lose your material and progress.',
+      'لا توجد مواد متبقية. يمكنك متابعة مذاكرة المادة المحفوظة أو طلب زيادة الحد من المشرف.': 'No materials remaining. Continue studying saved material or ask the administrator to increase your allowance.',
+      'توجد عملية توليد معلقة. ألغها أو انتظر انتهاء حجزها.': 'A generation is pending. Cancel it or wait for the reservation to expire.',
+      'تحديث الحد': 'Refresh allowance',
+      'متابعة المادة المحفوظة': 'Resume saved material',
+      'بلا حد': 'Unlimited',
+      'إجمالي المواد المسموح بها': 'Total material allowance',
+      'المواد المستخدمة / المتبقية': 'Materials used / remaining',
+      'حفظ الحد': 'Save allowance',
+      'أدخل حداً إجمالياً صحيحاً غير سالب أو اختر بلا حد.': 'Enter a nonnegative whole-number total allowance, or choose Unlimited.',
+      'تعذر الحفظ على هذا الجهاز. لا تغلق المتصفح قبل إنهاء الدراسة.': 'Could not save on this device. Keep this browser open until you finish studying.',
+      'تعذر استعادة المادة المحفوظة على هذا الجهاز.': 'Could not restore the material saved on this device.',
+      'تعذرت المراجعة الأكاديمية؛ تم حفظ المسودة المتاحة.': 'Academic revision failed; the available draft was saved.',
+      'تم استخدام التقييم المحلي الاحتياطي.': 'The local fallback evaluator was used.',
+      'إلغاء الحجز المعلق': 'Cancel pending reservation',
+      'تُحتسب مادة واحدة عند أول توليد ناجح. فشل المراجعة أو الحفظ لاحقاً لا يعيد الحد تلقائياً.': 'One material is used on the first successful generation. A later revision or save failure does not automatically refund the allowance.',
+      'إلغاء الحجز لا يعيد مادة استهلكها توليد ناجح. هل تريد المتابعة؟': 'Cancelling does not refund a material already used by successful generation. Continue?',
       'صلاحية الذكاء الاصطناعي غير مفعّلة': 'AI access is not enabled',
       'تواصل مع المشرف لتفعيل صلاحية الذكاء الاصطناعي لحسابك.': 'Contact the administrator to enable AI access for your account.',
       'يمكنك توليد الأسئلة وتحليل الإجابات باستخدام الذكاء الاصطناعي المُدار من السيرفر.': 'Generate questions and analyze answers using server-managed AI.',
@@ -950,17 +973,43 @@
       }
     };
 
-    // AI is configured on the server; guests use the same endpoint as accounts.
-    const requestAiCompletion = async ({ purpose = 'brain', payload, signal = null }) => {
-      const headers = { 'Content-Type': 'application/json' };
-      const token = localStorage.getItem('auth_token');
-      if (token) headers.Authorization = `Bearer ${token}`;
+    // Local quota is advisory only. The persistent device ID identifies the server allowance.
+    const GUEST_MATERIAL_KEY = 'smartExamGuestMaterial.v1';
+    const getGuestDevice = () => {
+      let id = localStorage.getItem('guest_device_id');
+      if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem('guest_device_id', id);
+      }
+      return id;
+    };
+    const apiHeaders = (token = localStorage.getItem('auth_token') || '') => ({
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : { 'X-Guest-Device': getGuestDevice() })
+    });
+    let activeMaterialContext = { generationId: null, materialId: null };
+    const materialApi = async (endpoint, { token, method = 'GET', body, signal } = {}) => {
+      const res = await fetch(getApiUrl(endpoint), {
+        method, headers: apiHeaders(token), signal,
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {})
+      });
+      let data;
+      try { data = await res.json(); } catch (_) { throw new Error('Invalid server response.'); }
+      if (!res.ok || data.success === false) throw new Error(data.message || `Server error (${res.status})`);
+      return data;
+    };
+
+    // Every AI operation belongs to a reservation or an already saved material.
+    const requestAiCompletion = async ({ purpose = 'brain', operation, generationId, materialId, payload, evaluation, signal = null }) => {
+      const ownerToken = localStorage.getItem('auth_token') || '';
+      const headers = apiHeaders(ownerToken);
+      const context = generationId ? { generationId } : materialId ? { materialId } : activeMaterialContext;
       let res;
       try {
         res = await fetch(getApiUrl('/ai/generate'), {
           method: 'POST',
           headers,
-          body: JSON.stringify({ purpose, payload }),
+          body: JSON.stringify({ purpose, operation, ...context, payload, evaluation }),
           signal
         });
       } catch (error) {
@@ -978,6 +1027,7 @@
       if (!res.ok) {
         throw new Error(json.message || `خطأ من الخادم (${res.status})`);
       }
+      if ((localStorage.getItem('auth_token') || '') !== ownerToken) throw new DOMException('Account changed.', 'AbortError');
       return json.data || json;
     };
 
@@ -1390,7 +1440,7 @@
     };
 
     const fetchTtsAudio = async (text, signal = null, language = getContentLanguage(text)) => {
-      if (!text) return null;
+      if (!text || (!activeMaterialContext.materialId && !activeMaterialContext.generationId)) return null;
       const spokenCleanText = cleanTextForTts(text, language) || text;
       const cacheKey = `${language}_${spokenCleanText}`;
       if (voiceCache[cacheKey]) return voiceCache[cacheKey];
@@ -1407,7 +1457,7 @@
             speechConfig: { languageCode: getSpeechLocale({ language }) }
           }
         };
-        const data = await requestAiCompletion({ purpose: 'tts', payload, signal: combinedSignal });
+        const data = await requestAiCompletion({ purpose: 'tts', operation: 'evaluate', payload, signal: combinedSignal });
         const inlineAudio = data.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.data)?.inlineData;
         if (!inlineAudio?.data) return null;
         let audioData = inlineAudio.data;
@@ -1427,7 +1477,10 @@
         voiceCache[cacheKey] = result;
         return result;
       } catch (err) {
-        if (err.name !== 'AbortError') console.warn('Server narration unavailable:', err);
+        if (err.name !== 'AbortError') {
+          console.warn('Server narration unavailable:', err);
+          window.__reportAppError?.('Audio / API Error', err.message);
+        }
         return null;
       } finally {
         clearTimeout(timeoutId);
@@ -1749,43 +1802,12 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
     const evaluateShortAnswerWithAi = async ({ questionText, expectedAnswer, studentAnswer, hint, language = getContentLanguage(questionText) }) => {
 
       try {
-        const prompt = `
-LANGUAGE REQUIREMENT: Write feedback and revisedAnswer in the question/material language (${language}), independently of the app UI language or the language of these instructions. Preserve original technical terms. Do not switch to the student's answer language.
-أنت مصحح ومراجع أكاديمي فائق الذكاء، متخصص في تقييم إجابات الطلاب القصيرة (Short Answer Evaluation).
-نظراً لاختلاف أساليب الطلاب في الكتابة وتفاوت الصياغة وسرعة الكتابة على لوحة المفاتيح ووجود أخطاء إملائية وطباعية شائعة (Typing inconsistency / Typos / Synonyms)، مهمتك مراجعة إجابة الطالب بذكاء والتأكد من مطابقتها الدلالية والمعرفية للإجابة النموذجية.
-
-سياق السؤال:
-- السؤال: "${questionText}"
-- الإجابة النموذجية المرجعية: "${expectedAnswer}"
-${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
-
-إجابة الطالب المدخلة:
-"${studentAnswer}"
-
-تعليمات المراجعة ومعيار القبول الصارم (85%):
-1. التسامح مع الأخطاء الطباعية والإملائية: تسامح مع الفروقات الناتجة عن سرعة الكتابة مثل (الهمزات: أ/إ/آ/ا، التاء المربوطة والهاء: ة/ه، الياء والألف المقصورة: ي/ى، التنوين والشدة، ونقصان أو زيادة حرف لا يخل بالمعنى).
-2. المرادفات والصياغات البديلة: إذا عبّر الطالب عن نفس المفهوم بمرادفات لغوية أو علمية صحيحة، احسبها صحيحة.
-3. معيار القبول الصارم والمحدد بنسبة 85%:
-- تُعتبر الإجابة صحيحة ومقبولة تماماً (isCorrect = true) إذا وفقط إذا كانت نسبة التطابق الدلالي والمعرفي تساوي أو تتجاوز 85% (similarityScore >= 85).
-- إذا كانت النسبة أقل من 85% (similarityScore < 85)، تُعتبر الإجابة غير كافية وتحتاج إلى دقة إضافية (isCorrect = false).
-
-أرجع فقط كائن JSON صالحاً بالهيكل التالي بدون أي كود أو نصوص إضافية:
-{
-  "isCorrect": true,
-  "similarityScore": 90,
-  "feedback": "ملاحظة تشجيعية موجزة (سطر واحد) توضح للطالب مدى دقة إجابته ولماذا تم قبولها أو ما الذي ينقصها بلطف ووضوح",
-  "revisedAnswer": "إعادة صياغة إجابة الطالب لغوياً وإملائياً لتكون في أبهى صورة"
-}
-`;
-
-        const generationConfig = { responseMimeType: "application/json", temperature: 0.2 };
-
-        const payload = {
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig
-        };
-
-        const data = await requestAiCompletion({ payload });
+        // The server builds the grading prompt from structured answer data.
+        const data = await requestAiCompletion({
+          purpose: 'brain',
+          operation: 'evaluate',
+          evaluation: { questionText, expectedAnswer, studentAnswer, hint: hint || '', language }
+        });
 
         const parts = data.candidates?.[0]?.content?.parts || [];
         const contentPart = parts.find(p => !p.thought && p.text) || parts[parts.length - 1];
@@ -1809,12 +1831,13 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         };
       } catch (e) {
         console.warn("AI evaluation warning, falling back to local evaluator:", e);
+        window.__reportAppError?.('AI evaluation', `${e.message} — ${translateUi('تم استخدام التقييم المحلي الاحتياطي.')}`);
         return localEvaluateShortAnswer(expectedAnswer, studentAnswer, language);
       }
     };
 
     // المساعد 1: الاستخراج الذكي وهندسة الذاكرة العصبية الشاملة (Cognitive Multi-Method Pipeline)
-    const draftQuizFromMaterial = async ({ material }) => {
+    const draftQuizFromMaterial = async ({ material, generationId, signal }) => {
       const prompt = `
         ${contentLanguageInstructions}
         أنت مهندس ذاكرة عصبية ومعلم تفاعلي فائق الذكاء، خبير بأحدث نظريات علوم الإدراك (Cognitive Neuroscience) لتثبيت المعلومات المدرسية في الذاكرة الدائمة بأسرع وقت وأمتع طريقة دون أن يشعر الطالب بأي جهد جاف.
@@ -1908,7 +1931,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         generationConfig
       };
 
-      const data = await requestAiCompletion({ payload });
+      const data = await requestAiCompletion({ operation: 'draft', generationId, payload, signal });
 
       const parts = data.candidates?.[0]?.content?.parts || [];
       const contentPart = parts.find(p => !p.thought && p.text) || parts[parts.length - 1];
@@ -1924,7 +1947,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
     };
 
     // المساعد 2: التدقيق والمراجعة الأكاديمية الصارمة لكافة أنواع الأسئلة وفق سياق المادة
-    const reviseQuizDraft = async ({ material, draftQuestions }) => {
+    const reviseQuizDraft = async ({ material, draftQuestions, generationId, signal }) => {
       const prompt = `
         ${contentLanguageInstructions}
         Verify every field against the ORIGINAL source language. Correct any draft that was accidentally translated. Preserve or correct the language field for each question.
@@ -1957,7 +1980,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         generationConfig
       };
 
-      const data = await requestAiCompletion({ payload });
+      const data = await requestAiCompletion({ operation: 'revise', generationId, payload, signal });
 
       const parts = data.candidates?.[0]?.content?.parts || [];
       const contentPart = parts.find(p => !p.thought && p.text) || parts[parts.length - 1];
@@ -2066,6 +2089,35 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
       const [userMaterials, setUserMaterials] = useState([]);
       const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
       const [currentMaterialId, setCurrentMaterialId] = useState(null);
+      const [completedGenerationId, setCompletedGenerationId] = useState(null);
+      const [materialQuota, setMaterialQuota] = useState(null);
+      const [quotaLoading, setQuotaLoading] = useState(true);
+      const [quotaError, setQuotaError] = useState('');
+      const [sessionOwner, setSessionOwner] = useState(null);
+      const [guestSavedMaterial, setGuestSavedMaterial] = useState(null);
+      const [adminQuotaEdits, setAdminQuotaEdits] = useState({});
+      const [savingQuotaUser, setSavingQuotaUser] = useState(null);
+      const identityRef = useRef(authToken);
+      const generationRef = useRef(null);
+      const ownerKey = authToken ? `account:${authToken}` : 'guest';
+      const canGenerateMaterial = sessionOwner === ownerKey && !quotaLoading && !quotaError && !!materialQuota &&
+        materialQuota.canGenerate === true;
+      const refreshMaterialQuota = async (token = authToken) => {
+        setQuotaLoading(true);
+        setQuotaError('');
+        try {
+          const data = await materialApi('/api/material-quota', { token });
+          if (identityRef.current !== token) return null;
+          const quota = data.quota || data;
+          setMaterialQuota(quota);
+          return quota;
+        } catch (e) {
+          if (identityRef.current === token) { setMaterialQuota(null); setQuotaError(e.message); }
+          throw e;
+        } finally {
+          if (identityRef.current === token) setQuotaLoading(false);
+        }
+      };
 
       // إحصائيات وقائمة مستخدمي لوحة المشرف وإعدادات الذكاء الاصطناعي
       const [adminTab, setAdminTab] = useState('users'); // 'users' | 'ai_settings'
@@ -2100,6 +2152,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
             headers: { 'Authorization': `Bearer ${t}` }
           });
           const data = await res.json();
+          if (identityRef.current !== t) return;
           if (data.authenticated && data.user) {
             setCurrentUser(data.user);
             localStorage.setItem('user_has_server_ai', data.user.has_server_ai_access === 1 ? 'true' : 'false');
@@ -2107,6 +2160,9 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
               setPlayerName(data.user.name);
             }
           } else {
+            identityRef.current = '';
+            generationRef.current?.controller.abort();
+            activeMaterialContext = {};
             localStorage.removeItem('auth_token');
             localStorage.removeItem('user_has_server_ai');
             setAuthToken('');
@@ -2119,6 +2175,19 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
 
       useEffect(() => {
         if (authToken) checkAuthSession(authToken);
+      }, [authToken]);
+      useEffect(() => {
+        const syncAccount = event => {
+          if (event.key !== 'auth_token' && event.key !== null) return;
+          const token = localStorage.getItem('auth_token') || '';
+          identityRef.current = token;
+          generationRef.current?.controller.abort();
+          activeMaterialContext = {};
+          setCurrentUser(null);
+          setAuthToken(token);
+        };
+        window.addEventListener('storage', syncAccount);
+        return () => window.removeEventListener('storage', syncAccount);
       }, []);
 
       useEffect(() => {
@@ -2168,6 +2237,9 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                       if (cancelled) return;
                       if (!res.ok || !data.success) throw new Error(data.message || t('فشل تسجيل الدخول بحساب Google'));
                       if (data.success) {
+                        identityRef.current = data.token;
+                        generationRef.current?.controller.abort();
+                        activeMaterialContext = {};
                         setAuthToken(data.token);
                         localStorage.setItem('auth_token', data.token);
                         localStorage.setItem('user_has_server_ai', data.user.has_server_ai_access === 1 ? 'true' : 'false');
@@ -2223,6 +2295,10 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
 
       // تسجيل الخروج
       const handleLogout = () => {
+        identityRef.current = '';
+        generationRef.current?.controller.abort();
+        activeMaterialContext = {};
+        sessionStorage.removeItem('smartExamAccountSession');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user_has_server_ai');
         setAuthToken('');
@@ -2240,7 +2316,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
             headers: { 'Authorization': `Bearer ${authToken}` }
           });
           const data = await res.json();
-          if (data.success) {
+          if (data.success && identityRef.current === authToken) {
             setUserMaterials(data.materials || []);
           }
         } catch (e) {
@@ -2250,37 +2326,25 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         }
       };
 
-      // حفظ المادة والأسئلة تلقائياً في قاعدة البيانات
-      const saveMaterialToDb = async (title, questions, count) => {
-        if (!authToken || !questions || questions.length === 0) return null;
-        try {
-          const res = await fetch(getApiUrl('/api/materials'), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({
-              title: title || `مادة اختبار ${new Date().toLocaleDateString('ar-SA')}`,
-              questions,
-              totalQuestions: count || questions.length
-            })
-          });
-          const data = await res.json();
-          if (data.success && data.materialId) {
-            setCurrentMaterialId(data.materialId);
-            fetchUserMaterials();
-            return data.materialId;
-          }
-        } catch (e) {
-          console.warn('Failed to save material to DB:', e.message);
-        }
-        return null;
+      // Server charges once on successful draft; completion atomically confirms saving. Always await it.
+      const saveMaterialToDb = async (title, questions, generationId, token, signal) => {
+        const data = await materialApi(`/api/material-generations/${encodeURIComponent(generationId)}/complete`, {
+          token, method: 'POST', signal,
+          body: { title: title.slice(0, 255), questions, totalQuestions: questions.length }
+        });
+        if (identityRef.current !== token) throw new Error('Account changed.');
+        if (token && !data.materialId) throw new Error('The server did not confirm saving this material.');
+        setCurrentMaterialId(token ? data.materialId : null);
+        setCompletedGenerationId(generationId);
+        activeMaterialContext = token ? { materialId: data.materialId } : { generationId };
+        if (data.quota) setMaterialQuota(data.quota);
+        if (token) await fetchUserMaterials();
+        return data;
       };
 
       // حفظ تقدم الاختبار للاستئناف لاحقاً
       const saveProgressToDb = async (qIndex, currentScore, isCompleted = false, progressMode = mode, progressQuestions = shuffledQuestions) => {
-        if (!authToken || !currentMaterialId) return;
+        if (!authToken || !currentMaterialId || identityRef.current !== authToken || sessionOwner !== ownerKey) return;
         try {
           await fetch(getApiUrl('/api/progress'), {
             method: 'POST',
@@ -2323,7 +2387,10 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
               return;
             }
 
+            if (identityRef.current !== authToken) return;
             setCurrentMaterialId(mat.id);
+            setCompletedGenerationId(null);
+            activeMaterialContext = { materialId: mat.id };
             setQuestionsData(sanitized);
             setAllOriginalQuestions(sanitized);
 
@@ -2484,6 +2551,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
             fetchAdminAiSettings()
           ]);
 
+          if (identityRef.current !== authToken) return;
           if (statsRes && statsRes.success) setAdminStats(statsRes.stats);
           if (usersRes && usersRes.success) setAdminUsers(usersRes.users);
         } catch (e) {
@@ -2493,24 +2561,21 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         }
       };
 
-      // تبديل صلاحية مفتاح السيرفر لمستخدم معين في لوحة المشرف
-      const handleToggleUserAiAccess = async (userId, currentStatus) => {
-        try {
-          const res = await fetch(getApiUrl(`/api/admin/users/${userId}/toggle-ai`), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({ hasAccess: !currentStatus })
-          });
-          const data = await res.json();
-          if (data.success) {
-            setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, has_server_ai_access: currentStatus ? 0 : 1 } : u));
-          }
-        } catch (e) {
-          alert(translateUi('فشل تعديل الصلاحية:') + ' ' + translateUiError(e.message));
+      // Admin sets TOTAL lifetime allowance, not remaining credits or a binary AI permission.
+      const handleSaveUserQuota = async (user) => {
+        const value = adminQuotaEdits[user.id] ?? (user.material_limit === null ? 'unlimited' : String(user.material_limit ?? 1));
+        const limit = value === 'unlimited' ? null : Number(value);
+        if (value !== 'unlimited' && (!/^\d+$/.test(value) || !Number.isSafeInteger(limit) || limit < 0 || limit > 4294967295)) {
+          alert(t('أدخل حداً إجمالياً صحيحاً غير سالب أو اختر بلا حد.'));
+          return;
         }
+        setSavingQuotaUser(user.id);
+        try {
+          const data = await materialApi(`/api/admin/users/${user.id}/material-quota`, { token: authToken, method: 'POST', body: { materialLimit: limit } });
+          setAdminUsers(prev => prev.map(u => u.id === user.id ? { ...u, material_limit: data.quota.materialLimit, materials_used: data.quota.materialsUsed } : u));
+          if (user.id === currentUser?.id) await refreshMaterialQuota();
+        } catch (e) { alert(`${t('فشل تعديل الصلاحية:')} ${e.message}`); }
+        finally { setSavingQuotaUser(null); }
       };
 
       // تسجيل الدخول التجريبي السريع (Dev/Demo Login)
@@ -2523,6 +2588,9 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
           });
           const data = await res.json();
           if (data.success) {
+            identityRef.current = data.token;
+            generationRef.current?.controller.abort();
+            activeMaterialContext = {};
             setAuthToken(data.token);
             localStorage.setItem('auth_token', data.token);
             localStorage.setItem('user_has_server_ai', data.user.has_server_ai_access === 1 ? 'true' : 'false');
@@ -2793,20 +2861,68 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         }
       }, [currentIndex, mode, shuffledQuestions, questionsData, voiceEnabled, score, playerName]);
 
-      // استعادة الجلسة في حالة إعادة التحميل أو قلب شاشة الآيباد
+      // Restore only the current owner; guest state survives browser close, never migrates to accounts.
       useEffect(() => {
+        identityRef.current = authToken;
+        generationRef.current?.controller.abort();
+        cancelQuizInteraction();
+        stopAllSpeech();
+        activeMaterialContext = { generationId: null, materialId: null };
+        Object.keys(voiceCache).forEach(key => delete voiceCache[key]);
+        setCurrentMaterialId(null);
+        setCompletedGenerationId(null);
+        setQuestionsData([]);
+        setAllOriginalQuestions([]);
+        setShuffledQuestions([]);
+        setWrongQuestions([]);
+        setCurrentIndex(0);
+        setScore(0);
+        setSelectedAnswer(null);
+        setStudentShortAnswer('');
+        setShortAnswerEvaluation(null);
+        setIsEvaluatingShortAnswer(false);
+        setIsAnswerChecked(false);
+        setTimerActive(false);
+        if (recognitionRef.current) {
+          recognitionRef.current.onresult = null;
+          try { recognitionRef.current.abort(); } catch (_) {}
+          recognitionRef.current = null;
+        }
+        setIsListeningSpeech(false);
+        setMode('setup');
+        setUserMaterials([]);
+        setShowUserDashboard(false);
+        setShowAdminDashboard(false);
+        setAdminUsers([]);
+        setAdminStats(null);
+        setAdminQuotaEdits({});
+        setErrorAnnouncement(null);
+        setAppAnnouncement(null);
+        setGuestSavedMaterial(null);
+        setMaterialQuota(null);
+        setErrorMsg('');
+        setTextInput('');
+        selectedFiles.forEach(item => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+        setSelectedFiles([]);
+        setPlayerName('');
+        refreshMaterialQuota(authToken).catch(() => {});
         try {
-          const savedState = sessionStorage.getItem('smartExamSession');
+          sessionStorage.removeItem('smartExamSession'); // Discard legacy, unscoped state.
+          const savedState = authToken ? sessionStorage.getItem('smartExamAccountSession') : localStorage.getItem(GUEST_MATERIAL_KEY);
           if (savedState) {
             const parsed = JSON.parse(savedState);
-            if (parsed.playerName) {
-              setPlayerName(parsed.playerName);
-              setMode(parsed.mode || 'setup');
+            if (parsed.owner === ownerKey && Array.isArray(parsed.questionsData) && parsed.questionsData.length) {
+              if (!authToken) setGuestSavedMaterial(parsed);
+              setCurrentMaterialId(authToken ? parsed.materialId || null : null);
+              setCompletedGenerationId(parsed.generationId || null);
+              activeMaterialContext = authToken ? { materialId: parsed.materialId || null } : { generationId: parsed.generationId || null };
+              setPlayerName(parsed.playerName || '');
+              setMode(['intro', 'learn', 'quiz', 'result'].includes(parsed.mode) ? parsed.mode : 'intro');
               setQuestionsData((parsed.questionsData || []).map(normalizeQuestion).filter(Boolean));
               setAllOriginalQuestions((parsed.allOriginalQuestions || parsed.questionsData || []).map(normalizeQuestion).filter(Boolean));
               setCurrentIndex(parsed.currentIndex || 0);
               setScore(parsed.score || 0);
-              setTimeLeft(parsed.timeLeft || 15 * 60);
+              setTimeLeft(parsed.timeLeft ?? 15 * 60);
               setTimerActive(parsed.timerActive || false);
               setGenerationStatus(parsed.generationStatus || 'drafting');
               if (parsed.mode === 'quiz' && parsed.shuffledQuestions) {
@@ -2817,20 +2933,29 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
               }
             }
           }
-        } catch (e) {}
-        return () => stopAmbientMusic();
-      }, []);
+        } catch (e) { setErrorMsg(t('تعذر استعادة المادة المحفوظة على هذا الجهاز.')); }
+        setSessionOwner(ownerKey);
+        return () => { stopAmbientMusic(); generationRef.current?.controller.abort(); };
+      }, [authToken]);
 
-      // حفظ الجلسة المستمرة
+      // Persist only actual materials; clearing the upload workspace must not erase the guest's one material.
       useEffect(() => {
+        if (sessionOwner !== ownerKey || identityRef.current !== authToken || !questionsData.length ||
+            !['intro', 'learn', 'quiz', 'result'].includes(mode) || (!currentMaterialId && !completedGenerationId)) return;
+        // Checked answers have already changed score: persist the next question, not a double-scoreable answer.
+        const nextIndex = mode === 'quiz' && isAnswerChecked ? currentIndex + 1 : currentIndex;
+        const savedMode = mode === 'quiz' && isAnswerChecked && nextIndex >= shuffledQuestions.length ? 'result' : mode;
+        const state = { owner: ownerKey, materialId: currentMaterialId, generationId: completedGenerationId,
+          playerName, mode: savedMode, questionsData, allOriginalQuestions, wrongQuestions, currentIndex: nextIndex, score,
+          timeLeft, timerActive: savedMode === 'result' ? false : timerActive, generationStatus, shuffledQuestions };
         try {
-          if (mode !== 'generating' && mode !== 'setup') {
-            sessionStorage.setItem('smartExamSession', JSON.stringify({
-              playerName, mode, questionsData, allOriginalQuestions, wrongQuestions, currentIndex, score, timeLeft, timerActive, generationStatus, shuffledQuestions
-            }));
+          if (authToken) sessionStorage.setItem('smartExamAccountSession', JSON.stringify(state));
+          else {
+            localStorage.setItem(GUEST_MATERIAL_KEY, JSON.stringify(state));
+            setGuestSavedMaterial(state);
           }
-        } catch (e) {}
-      }, [playerName, mode, questionsData, allOriginalQuestions, wrongQuestions, currentIndex, score, timeLeft, timerActive, generationStatus, shuffledQuestions]);
+        } catch (e) { setErrorMsg(t('تعذر الحفظ على هذا الجهاز. لا تغلق المتصفح قبل إنهاء الدراسة.')); }
+      }, [authToken, sessionOwner, playerName, mode, questionsData, allOriginalQuestions, wrongQuestions, currentIndex, score, timeLeft, timerActive, generationStatus, shuffledQuestions, currentMaterialId, completedGenerationId, isAnswerChecked]);
 
       // المؤقت التنازلي للتعلم والاختبار مع التنبيه الفوري عند انتهائه
       useEffect(() => {
@@ -2944,6 +3069,9 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         setShowResetWarningModal(false);
         setShowTimerEndModal(false);
         setMode('upload');
+        activeMaterialContext = {};
+        setCurrentMaterialId(null);
+        setCompletedGenerationId(null);
         setQuestionsData([]);
         setAllOriginalQuestions([]);
         setWrongQuestions([]);
@@ -2989,29 +3117,46 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         speak(shuffled[0]);
       };
 
-      // معالجة البيانات عبر الذكاء الاصطناعي المُدار في السيرفر، بما في ذلك الضيوف.
+      // One reservation covers draft + revision + save, never study, TTS or evaluation.
       const processMaterial = async (materialPayload) => {
-        setMode('generating');
+        if (generationRef.current) return;
+        if (!canGenerateMaterial) {
+          setErrorMsg(quotaError || t('لا توجد مواد متبقية. يمكنك متابعة مذاكرة المادة المحفوظة أو طلب زيادة الحد من المشرف.'));
+          return;
+        }
+        const token = authToken;
+        const controller = new AbortController();
+        const job = { token, controller, generationId: null, completed: false };
+        generationRef.current = job;
         setGenerationStatus('drafting');
-        setErrorMsg("");
-
+        setErrorMsg('');
         try {
-          // المرحلة 1: المسودة ومفاتيح الحفظ (دعم الاختيار من متعدد والأسئلة المقالية القصيرة)
-          const draftQuestions = await draftQuizFromMaterial({ material: materialPayload });
+          // Refresh server truth before showing generation; the reservation is authoritative.
+          const quota = await refreshMaterialQuota(token);
+          if (identityRef.current !== token) return;
+          if (!quota || !quota.canGenerate) throw new Error(t('لا توجد مواد متبقية. يمكنك متابعة مذاكرة المادة المحفوظة أو طلب زيادة الحد من المشرف.'));
+          const started = await materialApi('/api/material-generations/start', { token, method: 'POST', body: {}, signal: controller.signal });
+          job.generationId = started.generationId;
+          if (!job.generationId) throw new Error('The server did not confirm the material reservation.');
+          if (identityRef.current !== token) throw new Error('Account changed.');
+          if (started.quota) setMaterialQuota(started.quota);
+          setMode('generating');
+          const draftQuestions = await draftQuizFromMaterial({ material: materialPayload, generationId: job.generationId, signal: controller.signal });
           if (!draftQuestions || !Array.isArray(draftQuestions) || draftQuestions.length === 0) {
             throw new Error("لم يتم العثور على أسئلة واضحة في المحتوى المرفوع.");
           }
 
+          if (identityRef.current !== token || controller.signal.aborted) throw new DOMException('Account changed.', 'AbortError');
           // المرحلة 2: المراجعة الأكاديمية
           setGenerationStatus('revising');
           let finalQuestions = draftQuestions;
+          let revisionWarning = '';
           try {
-            const revised = await reviseQuizDraft({ material: materialPayload, draftQuestions });
-            if (revised && Array.isArray(revised) && revised.length > 0) {
-              finalQuestions = revised;
-            }
-          } catch (revError) {
-            console.warn("Revision warning, using draft questions:", revError);
+            const revised = await reviseQuizDraft({ material: materialPayload, draftQuestions, generationId: job.generationId, signal: controller.signal });
+            if (revised?.length) finalQuestions = revised;
+          } catch (e) {
+            if (controller.signal.aborted || identityRef.current !== token) throw e;
+            revisionWarning = `${t('تعذرت المراجعة الأكاديمية؛ تم حفظ المسودة المتاحة.')} ${e.message}`;
           }
 
           const sanitized = (finalQuestions || []).map(normalizeQuestion).filter(Boolean);
@@ -3019,15 +3164,31 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
             throw new Error("لم يتم العثور على أسئلة واضحة في المحتوى المرفوع.");
           }
 
-          setQuestionsData(sanitized);
-          setAllOriginalQuestions(sanitized);
-          setWrongQuestions([]);
+          if (identityRef.current !== token) throw new Error('Account changed.');
           const materialTitle = (materialPayload && materialPayload.title)
             || (selectedFiles && selectedFiles.length > 0 ? selectedFiles.map(f => f.name || f.file?.name).filter(Boolean).join(' + ') : null)
             || (textInput ? textInput.trim().slice(0, 30) + '...' : null)
             || `مادة اختبار (${sanitized.length} سؤال)`;
-          saveMaterialToDb(materialTitle, sanitized, sanitized.length);
+          await saveMaterialToDb(materialTitle, sanitized, job.generationId, token, controller.signal);
+          job.completed = true;
+          if (!token) {
+            const saved = { owner: 'guest', title: materialTitle, generationId: job.generationId, playerName,
+              mode: 'intro', questionsData: sanitized, allOriginalQuestions: sanitized, shuffledQuestions: [],
+              wrongQuestions: [], currentIndex: 0, score: 0, timeLeft: 15 * 60, timerActive: false };
+            setGuestSavedMaterial(saved);
+            try { localStorage.setItem(GUEST_MATERIAL_KEY, JSON.stringify(saved)); }
+            catch (e) { window.__reportAppError?.('Local save', t('تعذر الحفظ على هذا الجهاز. لا تغلق المتصفح قبل إنهاء الدراسة.')); }
+          }
+          setQuestionsData(sanitized);
+          setAllOriginalQuestions(sanitized);
+          setWrongQuestions([]);
+          setCurrentIndex(0);
+          setScore(0);
           setMode('intro');
+          if (revisionWarning) {
+            setErrorMsg(revisionWarning);
+            setTimeout(() => { if (identityRef.current === token) window.__reportAppError?.('Revision', revisionWarning); }, 0);
+          }
           triggerConfetti();
           if (soundEnabled) playCorrect();
 
@@ -3049,10 +3210,19 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
           speak(welcomeSpeech);
         } catch (err) {
           console.error(err);
-          const errorText = err.message || "تعذر معالجة المحتوى. يرجى المحاولة لاحقاً أو التواصل مع المشرف.";
-          setErrorMsg(errorText);
-          setErrorAnnouncement({ type: 'Brain / API Error', message: errorText });
-          setMode('upload');
+          if (identityRef.current === token) {
+            const errorText = err.message || 'تعذر معالجة المحتوى. يرجى المحاولة لاحقاً أو التواصل مع المشرف.';
+            setErrorMsg(errorText);
+            setErrorAnnouncement({ type: 'Brain / API Error', message: errorText });
+            setMode('upload');
+          }
+        } finally {
+          if (job.generationId && !job.completed) {
+            try { await materialApi(`/api/material-generations/${encodeURIComponent(job.generationId)}`, { token, method: 'DELETE' }); }
+            catch (e) { if (identityRef.current === token) setErrorMsg(prev => `${prev} — ${e.message}`); }
+          }
+          if (generationRef.current === job) generationRef.current = null;
+          if (identityRef.current === token) refreshMaterialQuota(token).catch(() => {});
         }
       };
 
@@ -3168,6 +3338,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
 
       // دمج ومعالجة كافة الملفات والصور المختارة في مادة موحدة وبدء استخراج الأسئلة
       const handleProcessAllFiles = async () => {
+        if (!canGenerateMaterial || generationRef.current) return;
         if (selectedFiles.length === 0) {
           const msg = "يرجى اختيار صورة أو ملف واحد على الأقل قبل بدء التوليد.";
           setErrorMsg(msg);
@@ -3239,6 +3410,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
       };
 
       const handleTextSubmit = async () => {
+        if (!canGenerateMaterial || generationRef.current) return;
         if (!textInput.trim()) {
           const err = "الرجاء كتابة أو لصق نص المادة أو الأسئلة.";
           setErrorMsg(err);
@@ -3254,6 +3426,9 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
 
       // تجربة أسئلة جاهزة للتجربة الفورية (تشمل الاختيار من متعدد، إكمال الفراغ، الأسئلة المقالية، والترميز المزدوج)
       const loadDemoQuestions = () => {
+        activeMaterialContext = {};
+        setCurrentMaterialId(null);
+        setCompletedGenerationId(null);
         if (soundEnabled) playClick();
         const demo = [
           {
@@ -3798,6 +3973,48 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
         }
       };
 
+      const resumeGuestMaterial = () => {
+        if (authToken || !guestSavedMaterial || sessionOwner !== 'guest') return;
+        const saved = guestSavedMaterial;
+        setQuestionsData((saved.questionsData || []).map(normalizeQuestion).filter(Boolean));
+        setAllOriginalQuestions((saved.allOriginalQuestions || saved.questionsData || []).map(normalizeQuestion).filter(Boolean));
+        setShuffledQuestions((saved.shuffledQuestions || []).map(normalizeQuestion).filter(Boolean));
+        setWrongQuestions(saved.wrongQuestions || []);
+        setCompletedGenerationId(saved.generationId);
+        setCurrentMaterialId(null);
+        activeMaterialContext = { generationId: saved.generationId };
+        setCurrentIndex(saved.currentIndex || 0);
+        setScore(saved.score || 0);
+        setTimeLeft(saved.timeLeft ?? 15 * 60);
+        setTimerActive(saved.timerActive || false);
+        setMode(['intro', 'learn', 'quiz', 'result'].includes(saved.mode) ? saved.mode : 'intro');
+      };
+      const cancelPendingReservation = async () => {
+        if (!materialQuota?.pendingGenerationId || generationRef.current || !confirm(t('إلغاء الحجز لا يعيد مادة استهلكها توليد ناجح. هل تريد المتابعة؟'))) return;
+        try {
+          const data = await materialApi(`/api/material-generations/${encodeURIComponent(materialQuota.pendingGenerationId)}`, { token: authToken, method: 'DELETE' });
+          if (identityRef.current === authToken) setMaterialQuota(data.quota);
+        } catch (e) { setQuotaError(e.message); }
+      };
+      const renderMaterialQuota = () => (
+        <section aria-label={t('حد المواد')} aria-live="polite" className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl text-sm text-indigo-950 space-y-2">
+          <p className="font-black">{t('حد المواد')}</p>
+          {quotaLoading ? <p>{t('جاري التحقق من حد المواد...')}</p> : quotaError ? <p role="alert" className="text-rose-700">{quotaError}</p> : materialQuota && (
+            <p>{t('المستخدم: {used} • المتبقي: {remaining} • الحد الإجمالي: {limit}', { used: materialQuota.materialsUsed, remaining: materialQuota.materialLimit === null ? '∞' : materialQuota.remaining, limit: materialQuota.materialLimit === null ? t('بلا حد') : materialQuota.materialLimit })}</p>
+          )}
+          <p className="text-xs leading-relaxed">{t('حد إجمالي دائم، وليس يومياً. المذاكرة وإعادة الاختبار والصوت وتقييم الإجابات لا تستهلك مواد إضافية.')}</p>
+          <p className="text-xs leading-relaxed">{t('تُحتسب مادة واحدة عند أول توليد ناجح. فشل المراجعة أو الحفظ لاحقاً لا يعيد الحد تلقائياً.')}</p>
+          {!authToken && <p className="text-xs leading-relaxed">{t('للضيف مادة واحدة محفوظة على هذا الجهاز. يحدد الخادم الحد؛ مسح التخزين قد يفقد المادة والتقدم.')}</p>}
+          {!quotaLoading && !quotaError && !canGenerateMaterial && <p className="text-xs font-bold">{materialQuota?.pendingGenerationId ? t('توجد عملية توليد معلقة. ألغها أو انتظر انتهاء حجزها.') : t('لا توجد مواد متبقية. يمكنك متابعة مذاكرة المادة المحفوظة أو طلب زيادة الحد من المشرف.')}</p>}
+          <div className="flex flex-wrap justify-center gap-3 text-xs font-bold">
+            <button type="button" disabled={quotaLoading} onClick={() => refreshMaterialQuota().catch(() => {})} className="underline disabled:opacity-50">{t('تحديث الحد')}</button>
+            {materialQuota?.pendingGenerationId && !generationRef.current && <button type="button" onClick={cancelPendingReservation} className="underline text-rose-700">{t('إلغاء الحجز المعلق')}</button>}
+            {!authToken && guestSavedMaterial && <button type="button" onClick={resumeGuestMaterial} className="underline">{t('متابعة المادة المحفوظة')}</button>}
+          </div>
+        </section>
+      );
+      // Do not flash material from the previous owner while React resets the workspace.
+      if (sessionOwner !== ownerKey) return <div role="status" className="p-8 text-center text-indigo-700">{t('جاري التحقق من حد المواد...')}</div>;
       const activeQuestion = mode === 'quiz' ? shuffledQuestions[currentIndex] : questionsData[currentIndex];
       const getOptionLetter = (i) => (getContentLanguage(activeQuestion).startsWith('ar') ? ['أ', 'ب', 'ج', 'د', 'هـ', 'و'] : ['A', 'B', 'C', 'D', 'E', 'F'])[i] || (i + 1);
 
@@ -4193,41 +4410,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
 
                 {/* Body Content */}
                 <div className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-800">
-                  {/* AI Status Card */}
-                  <div className={`p-4 rounded-2xl border ${
-                    currentUser?.has_server_ai_access === 1 || currentUser?.role === 'admin'
-                      ? 'bg-emerald-50/70 border-emerald-200' 
-                      : 'bg-slate-50 border-slate-200'
-                  }`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${
-                          currentUser?.has_server_ai_access === 1 || currentUser?.role === 'admin'
-                            ? 'bg-emerald-500 text-white shadow-sm'
-                            : 'bg-slate-200 text-slate-600'
-                        }`}>
-                          <i className="fa-solid fa-robot"></i>
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-sm text-slate-800">
-                            {currentUser?.has_server_ai_access === 1 || currentUser?.role === 'admin' ? (
-                              <span className="text-emerald-700 flex items-center gap-1.5">
-                                <i className="fa-solid fa-circle-check"></i>
-                                {t('مفتاح الذكاء الاصطناعي من السيرفر مفعل لك!')}
-                              </span>
-                            ) : (
-                              <span className="text-slate-700">{t('صلاحية الذكاء الاصطناعي غير مفعّلة')}</span>
-                            )}
-                          </h4>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {currentUser?.has_server_ai_access === 1 || currentUser?.role === 'admin'
-                              ? t('يمكنك توليد الأسئلة وتحليل الإجابات باستخدام الذكاء الاصطناعي المُدار من السيرفر.')
-                              : t('تواصل مع المشرف لتفعيل صلاحية الذكاء الاصطناعي لحسابك.')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  {renderMaterialQuota()}
 
                   {/* Saved Materials and Progress Section */}
                   <div>
@@ -4436,15 +4619,17 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                                 <th className="p-3">{t('المستخدم')}</th>
                                 <th className="p-3">{t('الحساب')}</th>
                                 <th className="p-3 text-center">{t('طلبات AI')}</th>
-                                <th className="p-3 text-center">{t('المواد المحفوظة')}</th>
-                                <th className="p-3 text-center">{t('صلاحية AI السيرفر')}</th>
+                                <th className="p-3 text-center">{t('المواد المستخدمة / المتبقية')}</th>
+                                <th className="p-3 text-center">{t('إجمالي المواد المسموح بها')}</th>
                                 <th className="p-3 text-center">{t('الإجراء')}</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                               {adminUsers.map((u) => {
-                                const hasAi = u.has_server_ai_access === 1;
                                 const isAdmin = u.role === 'admin';
+                                const limit = isAdmin || u.material_limit === null ? null : Number(u.material_limit ?? 1);
+                                const used = Number(u.materials_used ?? 0);
+                                const edit = adminQuotaEdits[u.id] ?? (limit === null ? 'unlimited' : String(limit));
 
                                 return (
                                   <tr key={u.id} className="hover:bg-slate-50/70 transition">
@@ -4464,30 +4649,27 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                                       {u.ai_calls_count || 0}
                                     </td>
                                     <td className="p-3 text-center font-bold text-slate-700">
-                                      {u.materials_count || 0}
+                                      {used} / {limit === null ? '∞' : Math.max(0, limit - used)}
                                     </td>
                                     <td className="p-3 text-center">
-                                      {hasAi || isAdmin ? (
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
-                                          <i className="fa-solid fa-check"></i>
-                                          {t('ممنوح')}
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-500 rounded-full font-bold text-[10px]">
-                                          {t('محجوب')}
-                                        </span>
-                                      )}
+                                      <div className="flex flex-col items-center gap-2 min-w-[110px]">
+                                        <label className="flex items-center gap-1 text-slate-700">
+                                          <input type="checkbox" checked={edit === 'unlimited'} disabled={isAdmin}
+                                            onChange={e => setAdminQuotaEdits(prev => ({ ...prev, [u.id]: e.target.checked ? 'unlimited' : String(limit ?? 1) }))} />
+                                          {t('بلا حد')}
+                                        </label>
+                                        {edit !== 'unlimited' && <input type="number" min="0" max="4294967295" step="1" value={edit}
+                                          aria-label={`${t('إجمالي المواد المسموح بها')} — ${u.name || u.email}`}
+                                          onChange={e => setAdminQuotaEdits(prev => ({ ...prev, [u.id]: e.target.value }))}
+                                          className="w-24 rounded-lg border border-slate-300 p-1.5 text-center focus:ring-2 focus:ring-amber-500 outline-none" />}
+                                      </div>
                                     </td>
                                     <td className="p-3 text-center">
                                       <button
-                                        onClick={() => handleToggleUserAiAccess(u.id, hasAi)}
-                                        className={`px-3 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer shadow-2xs ${
-                                          hasAi
-                                            ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
-                                            : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                        }`}
+                                        onClick={() => handleSaveUserQuota(u)} disabled={isAdmin || savingQuotaUser !== null}
+                                        className="px-3 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer bg-amber-100 text-amber-900 hover:bg-amber-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
-                                        {hasAi ? t('سحب الصلاحية') : t('منح AI السيرفر')}
+                                        {savingQuotaUser === u.id ? t('جاري الحفظ...') : t('حفظ الحد')}
                                       </button>
                                     </td>
                                   </tr>
@@ -4894,19 +5076,18 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                           aria-label={t('لوحة المشرف')}
                         >
                           <i className="fa-solid fa-crown text-[11px] text-amber-950"></i>
-                          <span className="hidden sm:inline">{t('لوحة المشرف')}</span>
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={() => { openHeaderDialog(setShowUserDashboard); fetchUserMaterials(); }}
                         className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-full text-xs font-bold text-white border border-white/20 transition cursor-pointer shrink-0"
-                        title={currentUser.has_server_ai_access === 1 || currentUser.role === 'admin' ? t('ذكاء السيرفر مفعّل (Gemini/Vertex)') : t('الحساب متصل')}
+                        title={t('حسابي وموادي')}
                         aria-label={t('الحساب')}
                       >
                         <i className={`fa-solid ${currentUser.auth_provider === 'apple' ? 'fa-apple' : 'fa-user'} text-[11px]`}></i>
                         <span dir="auto" className="max-w-[75px] truncate hidden sm:inline">{currentUser.name || currentUser.email.split('@')[0]}</span>
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${currentUser.has_server_ai_access === 1 || currentUser.role === 'admin' ? 'bg-emerald-400 ring-2 ring-emerald-200' : 'bg-amber-300'}`}></span>
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${canGenerateMaterial ? 'bg-emerald-400 ring-2 ring-emerald-200' : 'bg-amber-300'}`}></span>
                       </button>
                     </>
                   ) : (
@@ -4954,6 +5135,11 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                 </div>
               </div>
             )}
+
+            {errorMsg && mode !== 'upload' && <div role="alert" className="mx-4 sm:mx-6 mt-3 p-3 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-xs font-bold flex gap-3 items-center justify-between">
+              <span>{uiError(errorMsg)}</span>
+              <button type="button" aria-label={t('إغلاق التنبيه')} onClick={() => setErrorMsg('')} className="p-1 shrink-0"><i className="fa-solid fa-xmark"></i></button>
+            </div>}
 
             {/* ملصق إعلانات النظام والإنجازات (اكتمال إعداد المادة ونهاية الأسئلة) */}
             {appAnnouncement && (
@@ -5045,6 +5231,8 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                       <span>{uiError(errorMsg)}</span>
                     </div>
                   )}
+
+                  {renderMaterialQuota()}
 
                   {/* تبويبات الاختيار: ملفات وصور متعددة أو نص */}
                   <div className="flex bg-slate-100 p-1 rounded-2xl max-w-sm mx-auto text-sm font-bold">
@@ -5189,7 +5377,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                           <button
                             type="button"
                             onClick={handleProcessAllFiles}
-                            disabled={isProcessingFiles}
+                            disabled={isProcessingFiles || !canGenerateMaterial}
                             className="w-full bg-gradient-to-l from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white py-4 rounded-2xl font-black text-base transition shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
                           >
                             {isProcessingFiles ? (
@@ -5218,7 +5406,8 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                       ></textarea>
                       <button 
                         onClick={handleTextSubmit}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3.5 rounded-2xl font-bold transition shadow-lg shadow-indigo-100"
+                        disabled={!canGenerateMaterial || isProcessingFiles}
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3.5 rounded-2xl font-bold transition shadow-lg shadow-indigo-100"
                       >
                         {t('تحليل النص الذكي')} <i className="fa-solid fa-arrow-left mr-1"></i>
                       </button>
@@ -5426,16 +5615,16 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                               {questionsData[currentIndex].options.map((opt, i) => (
                                 <div 
                                   key={i}
-                                  dir="auto" data-material-text lang={getContentLanguage(questionsData[currentIndex])}
-                                  className={`p-3 rounded-xl border text-right font-medium transition flex items-center justify-between ${
+                                  dir={getContentLanguage(questionsData[currentIndex]).startsWith('ar') ? 'rtl' : 'ltr'} data-material-text lang={getContentLanguage(questionsData[currentIndex])}
+                                  className={`p-3 rounded-xl border font-medium transition flex items-center gap-2 ${
                                     i === questionsData[currentIndex].correct 
                                       ? 'bg-emerald-50 border-emerald-400 text-emerald-800 font-bold shadow-sm' 
                                       : 'bg-white border-slate-200 text-slate-400 opacity-60'
                                   }`}
                                 >
-                                  <div className="flex-1">
-                                    <bdi dir={getContentLanguage(questionsData[currentIndex]).startsWith('ar') ? 'rtl' : 'ltr'} className="font-black ml-2">({getOptionLetter(i)})</bdi>
-                                    <bdi dir="auto">{opt}</bdi>
+                                  <div className="flex flex-1 min-w-0 items-center gap-2">
+                                    <bdi className="font-black shrink-0">({getOptionLetter(i)})</bdi>
+                                    <bdi className="flex-1 min-w-0 break-words">{opt}</bdi>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     {i === questionsData[currentIndex].correct && (
@@ -5720,7 +5909,7 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                     <div className="space-y-2.5 flex-1 overflow-y-auto">
                       {shuffledQuestions[currentIndex].options.map((opt, i) => {
                         const isYn = shuffledQuestions[currentIndex].options.length === 2;
-                        let btnStyle = "quiz-option-btn w-full text-right p-3.5 rounded-2xl border-2 font-bold text-base transition-colors select-none ";
+                        let btnStyle = "quiz-option-btn w-full flex items-center gap-2 p-3.5 rounded-2xl border-2 font-bold text-base transition-colors select-none ";
                         if (!isAnswerChecked) {
                           btnStyle += "bg-white border-slate-200 text-slate-700 quiz-option-btn-idle active:bg-indigo-50 active:border-indigo-400 active:scale-[0.99]";
                         } else {
@@ -5749,18 +5938,18 @@ ${hint ? `- مفتاح الحفظ الإرشادي: "${hint}"` : ''}
                               if (e.currentTarget && e.currentTarget.blur) e.currentTarget.blur();
                             }}
                             disabled={isAnswerChecked}
-                            dir="auto" lang={getContentLanguage(shuffledQuestions[currentIndex])}
+                            dir={getContentLanguage(shuffledQuestions[currentIndex]).startsWith('ar') ? 'rtl' : 'ltr'} data-material-text lang={getContentLanguage(shuffledQuestions[currentIndex])}
                             className={btnStyle}
                           >
-                            <bdi dir={getContentLanguage(shuffledQuestions[currentIndex]).startsWith('ar') ? 'rtl' : 'ltr'} className="inline-block w-7 font-black ml-1 text-slate-400">({getOptionLetter(i)})</bdi>
-                            {isTrueOpt && <i className="fa-solid fa-check text-emerald-600 ml-1.5"></i>}
-                            {isFalseOpt && <i className="fa-solid fa-xmark text-red-500 ml-1.5"></i>}
-                            <bdi dir="auto">{opt}</bdi>
+                            <bdi className="w-8 shrink-0 font-black text-slate-400">({getOptionLetter(i)})</bdi>
+                            {isTrueOpt && <i aria-hidden="true" className="fa-solid fa-check text-emerald-600 shrink-0"></i>}
+                            {isFalseOpt && <i aria-hidden="true" className="fa-solid fa-xmark text-red-500 shrink-0"></i>}
+                            <bdi className="flex-1 min-w-0 break-words">{opt}</bdi>
                             {isAnswerChecked && i === shuffledQuestions[currentIndex].correct && (
-                              <i className="fa-solid fa-circle-check text-emerald-500 float-left mt-1 text-lg"></i>
+                              <i className="fa-solid fa-circle-check text-emerald-500 shrink-0 text-lg"></i>
                             )}
                             {isAnswerChecked && i === selectedAnswer && i !== shuffledQuestions[currentIndex].correct && (
-                              <i className="fa-solid fa-circle-xmark text-red-500 float-left mt-1 text-lg"></i>
+                              <i className="fa-solid fa-circle-xmark text-red-500 shrink-0 text-lg"></i>
                             )}
                           </button>
                         );
