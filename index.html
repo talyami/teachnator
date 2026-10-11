@@ -190,7 +190,11 @@
     const UI_EN = {
       'حد المواد': 'Material allowance',
       'جاري التحقق من حد المواد...': 'Checking material allowance...',
-      'المستخدم: {used} • المتبقي: {remaining} • الحد الإجمالي: {limit}': 'Used: {used} • Remaining: {remaining} • Total allowance: {limit}',
+      'المواد المستخدمة': 'Materials used',
+      'المواد المتبقية': 'Materials remaining',
+      'إجمالي المواد': 'Total materials',
+      'جاري تحميل الأعداد...': 'Loading counts...',
+      'تعذر تحميل الأعداد': 'Could not load counts',
       'حد إجمالي دائم، وليس يومياً. المذاكرة وإعادة الاختبار والصوت وتقييم الإجابات لا تستهلك مواد إضافية.': 'This is a lifetime allowance, not a daily limit. Studying, retaking quizzes, audio and answer evaluation do not use additional materials.',
       'للضيف مادة واحدة محفوظة على هذا الجهاز. يحدد الخادم الحد؛ مسح التخزين قد يفقد المادة والتقدم.': 'Guests get one material, saved on this device. The server enforces the allowance; clearing storage may lose your material and progress.',
       'لا توجد مواد متبقية. يمكنك متابعة مذاكرة المادة المحفوظة أو طلب زيادة الحد من المشرف.': 'No materials remaining. Continue studying saved material or ask the administrator to increase your allowance.',
@@ -392,6 +396,14 @@
       'تعذر الاتصال بالخادم المحلي. شغّل npm start من مجلد المشروع ثم افتح http://localhost:3000.': 'Cannot reach the local server. Run npm start in the project folder, then open http://localhost:3000.',
       'تعذر الاتصال بخادم التطبيق. تحقق من اتصال الشبكة وتشغيل الخادم ثم حاول مرة أخرى.': 'Cannot reach the app server. Check your network connection and that the server is running, then try again.',
       'استجابة الخادم غير صالحة. تحقق من تشغيل خادم التطبيق وتوجيه مسار API إليه.': 'Invalid server response. Check that the app server is running and the API route points to it.',
+      'حجم المرفقات كبير جداً. قلّل حجم الملفات أو عددها ثم حاول مرة أخرى.': 'Attachments are too large. Reduce their size or number, then try again.',
+      'تعذر الاتصال بخادم التطبيق عبر بوابة الموقع. حاول مرة أخرى لاحقاً.': 'The site gateway could not reach the app server. Try again later.',
+      'خادم التطبيق غير متاح حالياً. حاول مرة أخرى لاحقاً.': 'The app server is currently unavailable. Try again later.',
+      'انتهت مهلة الاتصال بخادم التطبيق. تحقق من حالة المادة قبل إعادة التوليد.': 'The app server request timed out. Check the material status before generating again.',
+      'تم تجاوز حد الطلبات، حاول بعد دقيقة.': 'Too many requests. Try again in a minute.',
+      'مسار API غير موجود. حدّث خادم التطبيق ثم حاول مرة أخرى.': 'API route not found. Update the app server, then try again.',
+      'بيانات الطلب غير صالحة. أعد المحاولة.': 'Invalid request data. Try again.',
+      'حدث خطأ في خادم التطبيق. حاول مرة أخرى لاحقاً.': 'An app server error occurred. Try again later.',
       'المساعد الصوتي': 'Voice assistant',
       'المساعد الصوتي مفعّل (انقر للكتم الفوري)': 'Voice assistant is on (click to mute)',
       'المساعد الصوتي معطل (انقر للتفعيل)': 'Voice assistant is off (click to enable)',
@@ -948,8 +960,10 @@
     // Local HTML previews still need the Node API; hosted pages stay same-origin.
     const getApiUrl = (endpoint) => {
       const isLocalFile = window.location.protocol === 'file:';
+      const isLocalPreview = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) &&
+        window.location.port !== '3000';
       const isSubpath = /^\/fast-learning(?:\/|$)/.test(window.location.pathname);
-      const base = isLocalFile ? 'http://localhost:3000/api' : (isSubpath ? '/fast-learning/api' : '/api');
+      const base = isLocalFile || isLocalPreview ? 'http://localhost:3000/api' : (isSubpath ? '/fast-learning/api' : '/api');
       const clean = endpoint.startsWith('/api') ? endpoint.substring(4) : (endpoint.startsWith('/') ? endpoint : '/' + endpoint);
       return base + (clean.startsWith('/') ? clean : '/' + clean);
     };
@@ -987,16 +1001,40 @@
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : { 'X-Guest-Device': getGuestDevice() })
     });
+    // Reverse proxies can return HTML for upload/timeout failures. Never show their
+    // raw response, and never retry a paid generation automatically.
+    const readApiResponse = async (res) => {
+      let json;
+      try { json = await res.json(); } catch (_) {}
+      if (!json || typeof json !== 'object' || Array.isArray(json)) {
+        console.warn('Non-JSON API response', { status: res.status, url: res.url, contentType: res.headers.get('content-type') });
+        const messages = {
+          413: 'حجم المرفقات كبير جداً. قلّل حجم الملفات أو عددها ثم حاول مرة أخرى.',
+          429: 'تم تجاوز حد الطلبات، حاول بعد دقيقة.',
+          502: 'تعذر الاتصال بخادم التطبيق عبر بوابة الموقع. حاول مرة أخرى لاحقاً.',
+          503: 'خادم التطبيق غير متاح حالياً. حاول مرة أخرى لاحقاً.',
+          504: 'انتهت مهلة الاتصال بخادم التطبيق. تحقق من حالة المادة قبل إعادة التوليد.',
+          520: 'تعذر الاتصال بخادم التطبيق عبر بوابة الموقع. حاول مرة أخرى لاحقاً.',
+          521: 'خادم التطبيق غير متاح حالياً. حاول مرة أخرى لاحقاً.',
+          522: 'انتهت مهلة الاتصال بخادم التطبيق. تحقق من حالة المادة قبل إعادة التوليد.',
+          524: 'انتهت مهلة الاتصال بخادم التطبيق. تحقق من حالة المادة قبل إعادة التوليد.'
+        };
+        throw new Error(messages[res.status] || (res.status === 404 || res.ok
+          ? 'استجابة الخادم غير صالحة. تحقق من تشغيل خادم التطبيق وتوجيه مسار API إليه.'
+          : `خطأ من الخادم (${res.status})`));
+      }
+      if (!res.ok || json.success === false) {
+        throw new Error(json.message || `خطأ من الخادم (${res.status})`);
+      }
+      return json;
+    };
     let activeMaterialContext = { generationId: null, materialId: null };
     const materialApi = async (endpoint, { token, method = 'GET', body, signal } = {}) => {
       const res = await fetch(getApiUrl(endpoint), {
         method, headers: apiHeaders(token), signal,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {})
       });
-      let data;
-      try { data = await res.json(); } catch (_) { throw new Error('Invalid server response.'); }
-      if (!res.ok || data.success === false) throw new Error(data.message || `Server error (${res.status})`);
-      return data;
+      return readApiResponse(res);
     };
 
     // Every AI operation belongs to a reservation or an already saved material.
@@ -1014,19 +1052,11 @@
         });
       } catch (error) {
         if (error.name === 'AbortError') throw error;
-        throw new Error(window.location.protocol === 'file:'
+        throw new Error(getApiUrl('/ai/generate').startsWith('http://localhost:3000/')
           ? 'تعذر الاتصال بالخادم المحلي. شغّل npm start من مجلد المشروع ثم افتح http://localhost:3000.'
           : 'تعذر الاتصال بخادم التطبيق. تحقق من اتصال الشبكة وتشغيل الخادم ثم حاول مرة أخرى.');
       }
-      let json;
-      try {
-        json = await res.json();
-      } catch (_) {
-        throw new Error('استجابة الخادم غير صالحة. تحقق من تشغيل خادم التطبيق وتوجيه مسار API إليه.');
-      }
-      if (!res.ok) {
-        throw new Error(json.message || `خطأ من الخادم (${res.status})`);
-      }
+      const json = await readApiResponse(res);
       if ((localStorage.getItem('auth_token') || '') !== ownerToken) throw new DOMException('Account changed.', 'AbortError');
       return json.data || json;
     };
@@ -3996,23 +4026,28 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
           if (identityRef.current === authToken) setMaterialQuota(data.quota);
         } catch (e) { setQuotaError(e.message); }
       };
-      const renderMaterialQuota = () => (
-        <section aria-label={t('حد المواد')} aria-live="polite" className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl text-sm text-indigo-950 space-y-2">
-          <p className="font-black">{t('حد المواد')}</p>
-          {quotaLoading ? <p>{t('جاري التحقق من حد المواد...')}</p> : quotaError ? <p role="alert" className="text-rose-700">{quotaError}</p> : materialQuota && (
-            <p>{t('المستخدم: {used} • المتبقي: {remaining} • الحد الإجمالي: {limit}', { used: materialQuota.materialsUsed, remaining: materialQuota.materialLimit === null ? '∞' : materialQuota.remaining, limit: materialQuota.materialLimit === null ? t('بلا حد') : materialQuota.materialLimit })}</p>
-          )}
-          <p className="text-xs leading-relaxed">{t('حد إجمالي دائم، وليس يومياً. المذاكرة وإعادة الاختبار والصوت وتقييم الإجابات لا تستهلك مواد إضافية.')}</p>
-          <p className="text-xs leading-relaxed">{t('تُحتسب مادة واحدة عند أول توليد ناجح. فشل المراجعة أو الحفظ لاحقاً لا يعيد الحد تلقائياً.')}</p>
-          {!authToken && <p className="text-xs leading-relaxed">{t('للضيف مادة واحدة محفوظة على هذا الجهاز. يحدد الخادم الحد؛ مسح التخزين قد يفقد المادة والتقدم.')}</p>}
-          {!quotaLoading && !quotaError && !canGenerateMaterial && <p className="text-xs font-bold">{materialQuota?.pendingGenerationId ? t('توجد عملية توليد معلقة. ألغها أو انتظر انتهاء حجزها.') : t('لا توجد مواد متبقية. يمكنك متابعة مذاكرة المادة المحفوظة أو طلب زيادة الحد من المشرف.')}</p>}
-          <div className="flex flex-wrap justify-center gap-3 text-xs font-bold">
-            <button type="button" disabled={quotaLoading} onClick={() => refreshMaterialQuota().catch(() => {})} className="underline disabled:opacity-50">{t('تحديث الحد')}</button>
-            {materialQuota?.pendingGenerationId && !generationRef.current && <button type="button" onClick={cancelPendingReservation} className="underline text-rose-700">{t('إلغاء الحجز المعلق')}</button>}
-            {!authToken && guestSavedMaterial && <button type="button" onClick={resumeGuestMaterial} className="underline">{t('متابعة المادة المحفوظة')}</button>}
-          </div>
-        </section>
-      );
+      const renderMaterialQuota = () => {
+        const countsAvailable = !quotaLoading && !quotaError && !!materialQuota;
+        const count = (value) => countsAvailable ? (value ?? '—') : '—';
+        const unlimited = countsAvailable && materialQuota.materialLimit === null;
+        return (
+          <section aria-label={t('إجمالي المواد')} aria-live="polite" aria-busy={quotaLoading} className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl text-indigo-950">
+            <dl className="grid grid-cols-3 gap-2 text-center">
+              {[
+                ['المواد المستخدمة', count(materialQuota?.materialsUsed)],
+                ['المواد المتبقية', unlimited ? '∞' : count(materialQuota?.remaining)],
+                ['إجمالي المواد', unlimited ? '∞' : count(materialQuota?.materialLimit)]
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0">
+                  <dt className="text-[11px] sm:text-xs font-bold leading-relaxed">{t(label)}</dt>
+                  <dd dir="ltr" className="mt-1 text-xl sm:text-2xl font-black tabular-nums break-all">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {quotaLoading ? <p role="status" className="mt-2 text-center text-xs">{t('جاري تحميل الأعداد...')}</p> : (quotaError || !materialQuota) && <p role="alert" className="mt-2 text-center text-xs text-rose-700">{t('تعذر تحميل الأعداد')}</p>}
+          </section>
+        );
+      };
       // Do not flash material from the previous owner while React resets the workspace.
       if (sessionOwner !== ownerKey) return <div role="status" className="p-8 text-center text-indigo-700">{t('جاري التحقق من حد المواد...')}</div>;
       const activeQuestion = mode === 'quiz' ? shuffledQuestions[currentIndex] : questionsData[currentIndex];
@@ -4168,14 +4203,23 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                       <p className="text-[11px] text-slate-400">{t('تخصيص الصوت والموجات والتركيز')}</p>
                     </div>
                   </div>
-                  <button onClick={() => setShowSettings(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer">
-                    <i className="fa-solid fa-xmark text-xl"></i>
+                  <button type="button" aria-label={t('إغلاق')} onClick={() => setShowSettings(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer">
+                    <i aria-hidden="true" className="fa-solid fa-xmark text-xl"></i>
                   </button>
                 </div>
 
                 <div className="flex items-center justify-between mb-4 text-sm font-bold text-slate-700">
                   <span>{t('لغة الواجهة')}</span>
                   {renderLanguageToggle(true)}
+                </div>
+                <div className="mb-4">
+                  {renderMaterialQuota()}
+                  {(quotaError || materialQuota?.pendingGenerationId || (!quotaLoading && !materialQuota)) && (
+                    <div className="mt-2 flex flex-wrap justify-center gap-2 text-xs font-bold">
+                      <button type="button" disabled={quotaLoading} onClick={() => refreshMaterialQuota().catch(() => {})} className="px-3 py-2 rounded-xl text-indigo-700 hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 transition disabled:opacity-50">{t('تحديث الحد')}</button>
+                      {materialQuota?.pendingGenerationId && !generationRef.current && <button type="button" disabled={quotaLoading} onClick={cancelPendingReservation} className="px-3 py-2 rounded-xl text-rose-700 hover:bg-rose-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-600 transition disabled:opacity-50">{t('إلغاء الحجز المعلق')}</button>}
+                    </div>
+                  )}
                 </div>
                 <h4 className="font-bold text-purple-700 mb-4">{t('الموجات الصوتية والتركيز')}</h4>
                 
@@ -4410,8 +4454,6 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
 
                 {/* Body Content */}
                 <div className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-800">
-                  {renderMaterialQuota()}
-
                   {/* Saved Materials and Progress Section */}
                   <div>
                     <div className="flex items-center justify-between mb-3">
@@ -5232,7 +5274,12 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                     </div>
                   )}
 
-                  {renderMaterialQuota()}
+                  {!authToken && guestSavedMaterial && (
+                    <button type="button" onClick={resumeGuestMaterial} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 transition text-sm font-bold">
+                      <i aria-hidden="true" className="fa-solid fa-book-open"></i>
+                      {t('متابعة المادة المحفوظة')}
+                    </button>
+                  )}
 
                   {/* تبويبات الاختيار: ملفات وصور متعددة أو نص */}
                   <div className="flex bg-slate-100 p-1 rounded-2xl max-w-sm mx-auto text-sm font-bold">

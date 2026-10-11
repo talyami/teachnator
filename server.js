@@ -33,16 +33,14 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// دعم كلا المسارين (مباشر /api أو عبر المسار الفرعي /fast-learning/api)
+// Normalize before parsing so parser failures on either API path stay JSON.
 app.use((req, res, next) => {
-  if (req.url.startsWith('/fast-learning/api')) {
-    req.url = req.url.replace('/fast-learning/api', '/api');
-  }
+  req.url = req.url.replace(/^\/fast-learning\/api(?=\/|\?|$)/, '/api');
   next();
 });
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // تطبيق فحص التوكن العام لجميع الطلبات
 app.use(authenticateToken);
@@ -601,6 +599,21 @@ app.get('/api/config', (req, res) => {
     dbConnected: isDbConnected(),
     allowDevLogin: process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_LOGIN === 'true'
   });
+});
+
+// API failures must never fall through to Express HTML or the app shell.
+app.use('/api', (req, res) => {
+  res.status(404).json({ success: false, message: 'مسار API غير موجود. حدّث خادم التطبيق ثم حاول مرة أخرى.' });
+});
+app.use((error, req, res, next) => {
+  if (req.path !== '/api' && !req.path.startsWith('/api/')) return next(error);
+  if (res.headersSent) return next(error);
+  const status = error.type === 'entity.too.large' ? 413
+    : error.type === 'entity.parse.failed' ? 400 : 500;
+  const message = status === 413 ? 'حجم المرفقات كبير جداً. قلّل حجم الملفات أو عددها ثم حاول مرة أخرى.'
+    : status === 400 ? 'بيانات الطلب غير صالحة. أعد المحاولة.'
+    : 'حدث خطأ في خادم التطبيق. حاول مرة أخرى لاحقاً.';
+  res.status(status).json({ success: false, message });
 });
 
 // ==========================================
