@@ -181,7 +181,7 @@ app.post('/api/ai/generate', limitAiRequests, async (req, res) => {
   res.set('X-Accel-Buffering', 'no');
   const heartbeat = setInterval(() => {
     if (!res.destroyed && !res.writableEnded) {
-      res.type('json');
+      if (!res.headersSent) res.type('json');
       res.write(' \n');
     }
   }, 10000);

@@ -29,8 +29,12 @@ test('slow AI responses heartbeat and remain parseable JSON on success/error', a
       const first = await reader.read();
       const heartbeat = new TextDecoder().decode(first.value);
       assert.match(heartbeat, /^\s+$/);
+      // Read a second heartbeat to catch attempts to change headers after flush.
+      const second = await reader.read();
+      const nextHeartbeat = new TextDecoder().decode(second.value);
+      assert.match(nextHeartbeat, /^\s+$/);
       finish();
-      let text = heartbeat;
+      let text = heartbeat + nextHeartbeat;
       for (;;) {
         const chunk = await reader.read();
         if (chunk.done) break;
