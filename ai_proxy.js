@@ -17,9 +17,9 @@ function cleanBearer(value) {
   return String(value || '').trim().replace(/^(?:bearer\s+)+/i, '').trim();
 }
 
-async function requestJson(url, headers, payload) {
+async function requestJson(url, headers, payload, timeoutMs = 45000) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     // Never forward credentials across redirects or return upstream errors verbatim.
     const response = await fetch(url, {
@@ -217,7 +217,9 @@ async function generateBrain(settings, payload) {
   if (Number.isFinite(config.temperature) && config.temperature >= 0 && config.temperature <= 2) body.temperature = config.temperature;
   if (Number.isFinite(config.topP) && config.topP >= 0 && config.topP <= 1) body.top_p = config.topP;
   if (Number.isInteger(config.maxOutputTokens) && config.maxOutputTokens > 0) body.max_tokens = Math.min(config.maxOutputTokens, 32768);
-  const data = await requestJson(url.toString(), { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body);
+  // Full lesson extraction needs more time than short connection/TTS tests.
+  // The AI route sends heartbeats while waiting; still bound provider work to 90s.
+  const data = await requestJson(url.toString(), { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body, 90000);
   const text = data?.choices?.[0]?.message?.content;
   if (typeof text !== 'string' || !text.trim()) throw fail(502, 'لم يرجع مزود الذكاء الاصطناعي محتوى صالحاً.');
   const result = { candidates: [{ content: { role: 'model', parts: [{ text }] } }] };

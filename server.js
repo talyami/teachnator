@@ -174,12 +174,33 @@ function limitAiRequests(req, res, next) {
 
 // توليد المحتوى أو الاختبارات أو تقييم الإجابات
 app.post('/api/ai/generate', limitAiRequests, async (req, res) => {
+  // JSON whitespace keeps idle reverse proxies alive without changing the client
+  // contract: response.json() waits for the final object. After a heartbeat, errors
+  // use success:false because the HTTP status has already been sent.
+  res.set('Cache-Control', 'no-store, no-transform');
+  res.set('X-Accel-Buffering', 'no');
+  const heartbeat = setInterval(() => {
+    if (!res.destroyed && !res.writableEnded) {
+      res.type('json');
+      res.write(' \n');
+    }
+  }, 10000);
+  heartbeat.unref();
+  res.once('close', () => clearInterval(heartbeat));
+  const reply = (status, body) => {
+    clearInterval(heartbeat);
+    if (res.destroyed || res.writableEnded) return;
+    if (res.headersSent) res.end(JSON.stringify(body));
+    else res.status(status).json(body);
+  };
+  const startedAt = Date.now();
   try {
     const result = await handleAiGenerate(req.user, req.body, { guestDevice: req.get('X-Guest-Device') });
-    res.json(result);
+    reply(200, result);
   } catch (err) {
     const status = [400, 401, 403, 404, 409, 429, 502, 503, 504].includes(err.status) ? err.status : 500;
-    res.status(status).json({
+    console.warn('AI request failed', { status, operation: req.body?.operation, elapsedMs: Date.now() - startedAt });
+    reply(status, {
       success: false,
       message: status === 500 ? 'حدث خطأ أثناء معالجة طلب الذكاء الاصطناعي' : err.message
     });
