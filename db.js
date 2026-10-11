@@ -54,7 +54,6 @@ async function initDb() {
         role VARCHAR(50) DEFAULT 'user',
         has_server_ai_access TINYINT(1) DEFAULT 0,
         ai_calls_count INT DEFAULT 0,
-        custom_api_settings LONGTEXT,
         last_login DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_email (email),
@@ -107,6 +106,28 @@ async function initDb() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    // Environment values bootstrap missing rows only. Subsequent changes belong in MySQL.
+    const defaults = {
+      server_brain_url: process.env.SERVER_BRAIN_URL || 'https://srv875806.tail759794.ts.net:10000/v1',
+      server_brain_api_key: process.env.SERVER_BRAIN_API_KEY || '',
+      server_brain_model: process.env.SERVER_BRAIN_MODEL || 'combo-gemini-flash',
+      server_gemini_api_key: process.env.SERVER_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '',
+      server_vertex_config: JSON.stringify({
+        project: process.env.VERTEX_PROJECT_ID || '',
+        region: process.env.VERTEX_REGION || 'global',
+        key: process.env.VERTEX_KEY_TOKEN || ''
+      }),
+      server_tts_provider: process.env.SERVER_TTS_PROVIDER || 'gemini',
+      server_tts_model: process.env.SERVER_TTS_MODEL || 'gemini-2.5-flash-preview-tts',
+      server_tts_voice: process.env.SERVER_TTS_VOICE || 'Aoede'
+    };
+    for (const [key, value] of Object.entries(defaults)) {
+      await p.query(
+        'INSERT INTO admin_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_key = VALUES(setting_key)',
+        [key, value]
+      );
+    }
 
     console.log('✅ تم فحص وإنشاء جداول قاعدة البيانات بنجاح (users, materials, user_progress, admin_settings).');
     return true;

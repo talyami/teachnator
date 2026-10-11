@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS `users` (
   `role` VARCHAR(50) DEFAULT 'user', -- 'admin' أو 'user'
   `has_server_ai_access` TINYINT(1) DEFAULT 0, -- 1 = يمتلك صلاحية استخدام مفتاح المشرف
   `ai_calls_count` INT DEFAULT 0, -- عدد طلبات الذكاء الاصطناعي المنفذة
-  `custom_api_settings` LONGTEXT, -- إعدادات ومفاتيح المستخدم الشخصية بتنسيق JSON
   `last_login` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX `idx_email` (`email`),
@@ -63,7 +62,12 @@ CREATE TABLE IF NOT EXISTS `user_progress` (
   FOREIGN KEY (`material_id`) REFERENCES `materials`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. جدول إعدادات المشرف ومفاتيح السيرفر (Gemini / Vertex)
+-- 4. Server-only AI configuration, edited directly in MySQL.
+-- db.js inserts missing rows from server environment at startup, without overwriting changes.
+-- Brain: server_brain_url, server_brain_api_key, server_brain_model
+-- TTS: server_tts_provider, server_tts_model, server_tts_voice,
+--      server_gemini_api_key, server_vertex_config (JSON: project, region, key/token)
+-- Credentials must never be returned to the browser.
 CREATE TABLE IF NOT EXISTS `admin_settings` (
   `setting_key` VARCHAR(100) PRIMARY KEY,
   `setting_value` LONGTEXT,

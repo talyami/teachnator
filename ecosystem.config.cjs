@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'fast-learning-api',
-      script: './server/dist/index.js',
+      script: './server.js',
       cwd: __dirname,
       instances: 1,
       exec_mode: 'fork',

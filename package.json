@@ -1,23 +1,19 @@
 {
   "name": "fast-learning",
-  "version": "2.0.0",
-  "description": "Fast Learning: Accounts Rebuild & AI Quiz Generator",
+  "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "shared",
-    "server",
-    "web"
-  ],
+  "description": "Fast Learning study and memorization app",
+  "main": "server.js",
   "scripts": {
-    "dev:server": "npm --workspace=@fast-learning/server run dev",
-    "dev:web": "npm --workspace=@fast-learning/web run dev",
-    "dev": "npm --workspace=@fast-learning/server run dev",
-    "build:web": "npm --workspace=@fast-learning/web run build",
-    "build:server": "npm --workspace=@fast-learning/server run build",
-    "build": "npm run build:web && npm run build:server",
-    "migrate": "npm --workspace=@fast-learning/server run migrate",
-    "seed": "npm --workspace=@fast-learning/server run seed",
-    "test": "npm --workspace=@fast-learning/server run test",
-    "start": "npm --workspace=@fast-learning/server run start"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js && node --check auth.js && node --check db.js && node --check ai_proxy.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.24.5"
   }
 }

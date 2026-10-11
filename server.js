@@ -4,18 +4,16 @@ const path = require('path');
 const { exec } = require('child_process');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
-const { initDb, query, isDbConnected, dbConfig } = require('./db');
+const { initDb, query, isDbConnected } = require('./db');
 const {
   generateToken,
   verifyGoogleToken,
-  parseAppleToken,
   findOrCreateUser,
   authenticateToken,
   requireAuth,
-  requireAdmin,
-  ADMIN_EMAILS
+  requireAdmin
 } = require('./auth');
-const { handleAiGenerate, handleFetchModels, getServerAiCredentials } = require('./ai_proxy');
+const { handleAiGenerate } = require('./ai_proxy');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -70,8 +68,7 @@ app.post('/api/auth/google', async (req, res) => {
         role: user.role,
         auth_provider: user.auth_provider,
         has_server_ai_access: user.has_server_ai_access,
-        ai_calls_count: user.ai_calls_count,
-        custom_api_settings: user.custom_api_settings
+        ai_calls_count: user.ai_calls_count
       }
     });
   } catch (err) {
@@ -127,8 +124,7 @@ if (process.env.NODE_ENV === 'development') {
           role: user.role,
           auth_provider: user.auth_provider,
           has_server_ai_access: user.has_server_ai_access,
-          ai_calls_count: user.ai_calls_count,
-          custom_api_settings: user.custom_api_settings
+          ai_calls_count: user.ai_calls_count
         }
       });
     } catch (err) {
@@ -141,21 +137,6 @@ if (process.env.NODE_ENV === 'development') {
     res.status(404).json({ success: false, message: 'Not found' });
   });
 }
-        email: user.email,
-        name: user.name,
-        avatar: user.avatar,
-        role: user.role,
-        auth_provider: user.auth_provider,
-        has_server_ai_access: user.has_server_ai_access,
-        ai_calls_count: user.ai_calls_count,
-        custom_api_settings: user.custom_api_settings
-      }
-    });
-  } catch (err) {
-    console.error('Dev login error:', err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
 
 // استعلام بيانات الحساب الحالي (Me)
 app.get('/api/auth/me', (req, res) => {
@@ -172,8 +153,7 @@ app.get('/api/auth/me', (req, res) => {
       role: req.user.role,
       auth_provider: req.user.auth_provider,
       has_server_ai_access: req.user.has_server_ai_access,
-      ai_calls_count: req.user.ai_calls_count,
-      custom_api_settings: req.user.custom_api_settings
+      ai_calls_count: req.user.ai_calls_count
     }
   });
 });
@@ -182,29 +162,45 @@ app.get('/api/auth/me', (req, res) => {
 // 2. وسيط الذكاء الاصطناعي (AI Proxy & Quota)
 // ==========================================
 
+// Preserve guests with the same paid-endpoint limit as signed-in users.
+// Express's default trust proxy=false deliberately ignores spoofable forwarded IPs.
+// Behind a reverse proxy this conservatively shares quota until trusted hops are configured.
+const aiRateWindows = new Map();
+const AI_WINDOW_MS = 60000;
+const AI_REQUEST_LIMIT = 20;
+function limitAiRequests(req, res, next) {
+  const now = Date.now();
+  for (const [ip, bucket] of aiRateWindows) {
+    if (bucket.resetAt <= now) aiRateWindows.delete(ip);
+  }
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  let bucket = aiRateWindows.get(ip);
+  if (!bucket) {
+    // Bound memory even under a large number of distinct addresses.
+    if (aiRateWindows.size >= 10000) {
+      return res.status(429).json({ success: false, message: 'الخدمة مشغولة، حاول لاحقاً.' });
+    }
+    bucket = { count: 0, resetAt: now + AI_WINDOW_MS };
+    aiRateWindows.set(ip, bucket);
+  }
+  if (++bucket.count > AI_REQUEST_LIMIT) {
+    res.set('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+    return res.status(429).json({ success: false, message: 'تم تجاوز حد الطلبات، حاول بعد دقيقة.' });
+  }
+  next();
+}
+
 // توليد المحتوى أو الاختبارات أو تقييم الإجابات
-app.post('/api/ai/generate', async (req, res) => {
+app.post('/api/ai/generate', limitAiRequests, async (req, res) => {
   try {
     const result = await handleAiGenerate(req.user, req.body);
     res.json(result);
   } catch (err) {
-    const status = err.status || 500;
+    const status = [400, 403, 429, 502, 503, 504].includes(err.status) ? err.status : 500;
     res.status(status).json({
       success: false,
-      message: err.message || 'حدث خطأ أثناء معالجة طلب الذكاء الاصطناعي',
-      details: err.details || null
+      message: status === 500 ? 'حدث خطأ أثناء معالجة طلب الذكاء الاصطناعي' : err.message
     });
-  }
-});
-
-// جلب النماذج المتاحة
-app.get('/api/ai/models', async (req, res) => {
-  try {
-    const apiKey = req.query.key || '';
-    const models = await handleFetchModels(req.user, apiKey);
-    res.json({ success: true, ...models });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -396,15 +392,16 @@ app.delete('/api/progress/:materialId', requireAuth, async (req, res) => {
 // 5. إعدادات المستخدم الشخصية (User Settings)
 // ==========================================
 
-// حفظ إعدادات المستخدم (المفاتيح الشخصية والتفضيلات)
+// User settings accept display names only, never personal credentials.
 app.post('/api/user/settings', requireAuth, async (req, res) => {
   try {
-    const { customApiSettings, name } = req.body;
-    const settingsStr = typeof customApiSettings === 'string' ? customApiSettings : JSON.stringify(customApiSettings || {});
-
+    const { name } = req.body || {};
+    if (Object.keys(req.body || {}).some(key => key !== 'name') || typeof name !== 'string' || name.trim().length > 255) {
+      return res.status(400).json({ success: false, message: 'يمكن تحديث الاسم فقط (حتى 255 حرفاً).' });
+    }
     await query(
-      'UPDATE users SET custom_api_settings = ?, name = COALESCE(NULLIF(?, ""), name) WHERE id = ?',
-      [settingsStr, name || '', req.user.id]
+      'UPDATE users SET name = COALESCE(NULLIF(?, ""), name) WHERE id = ?',
+      [name.trim(), req.user.id]
     );
 
     res.json({ success: true, message: 'تم حفظ الإعدادات بنجاح' });
@@ -549,92 +546,6 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// جلب إعدادات المشرف للسيرفر (مفاتيح Gemini & Vertex)
-app.get('/api/admin/settings', requireAdmin, async (req, res) => {
-  try {
-    const creds = await getServerAiCredentials();
-    // إخفاء جزء من المفتاح للأمان
-    const maskKey = (k) => {
-      if (!k || k.length < 8) return k ? '***' : '';
-      return k.substring(0, 4) + '...' + k.substring(k.length - 4);
-    };
-
-    res.json({
-      success: true,
-      settings: {
-        provider: creds.provider,
-        geminiKeyMasked: maskKey(creds.geminiKey),
-        hasGeminiKey: Boolean(creds.geminiKey),
-        vertexConfig: {
-          project: creds.vertexConfig.project || '',
-          region: creds.vertexConfig.region || 'global',
-          hasKey: Boolean(creds.vertexConfig.key)
-        },
-        adminEmails: ADMIN_EMAILS,
-        dbHost: dbConfig.host,
-        dbName: dbConfig.database,
-        dbConnected: isDbConnected()
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// تحديث إعدادات مفاتيح السيرفر من لوحة التحكم
-app.post('/api/admin/settings', requireAdmin, async (req, res) => {
-  try {
-    const { geminiKey, provider, vertexConfig } = req.body;
-
-    if (geminiKey !== undefined && geminiKey.trim()) {
-      await query(
-        `INSERT INTO admin_settings (setting_key, setting_value, updated_at)
-         VALUES ('server_gemini_api_key', ?, NOW())
-         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()`,
-        [geminiKey.trim()]
-      );
-    }
-
-    if (provider) {
-      await query(
-        `INSERT INTO admin_settings (setting_key, setting_value, updated_at)
-         VALUES ('server_ai_provider', ?, NOW())
-         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()`,
-        [provider]
-      );
-    }
-
-    if (vertexConfig) {
-      const vStr = typeof vertexConfig === 'string' ? vertexConfig : JSON.stringify(vertexConfig);
-      await query(
-        `INSERT INTO admin_settings (setting_key, setting_value, updated_at)
-         VALUES ('server_vertex_config', ?, NOW())
-         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()`,
-        [vStr]
-      );
-    }
-
-    res.json({ success: true, message: 'تم تحديث إعدادات ومفاتيح السيرفر بنجاح' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// فحص واختبار مفتاح السيرفر مباشرة
-app.post('/api/admin/test-ai', requireAdmin, async (req, res) => {
-  try {
-    const result = await handleAiGenerate(req.user, {
-      modelName: 'gemini-2.5-flash',
-      payload: {
-        contents: [{ role: 'user', parts: [{ text: 'قل كلمة واحدة فقط: مرحباً' }] }]
-      }
-    });
-    res.json({ success: true, message: 'تم اختبار اتصال الذكاء الاصطناعي بنجاح! الاتصال يعمل بشكل ممتاز.', result });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'فشل اختبار اتصال الذكاء الاصطناعي: ' + err.message });
-  }
-});
-
 // ==========================================
 // 7. الإعدادات العامة للواجهة (Public Config)
 // ==========================================
@@ -652,13 +563,11 @@ app.get('/api/config', (req, res) => {
 // 8. تقديم الملفات الثابتة والواجهة (Static Files)
 // ==========================================
 
-// تقديم الملفات الثابتة من المجلد العام المحمي فقط
-const publicDir = path.join(__dirname, 'public');
-app.use(express.static(publicDir));
-
-// لأي مسار غير معرّف، تقديم صفحة التطبيق الرئيسية
-app.use((req, res) => {
-  res.sendFile(path.join(publicDir, 'index.html'));
+// Serve only the original app HTML; never expose server files or secrets.
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (req.path === '/api' || req.path.startsWith('/api/')) return next();
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // ==========================================
@@ -687,4 +596,11 @@ async function startServer() {
   });
 }
 
-startServer();
+if (require.main === module) {
+  startServer().catch(() => {
+    console.error('Server startup failed.');
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { app, startServer };
