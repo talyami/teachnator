@@ -242,10 +242,10 @@ app.get('/api/materials', requireAuth, async (req, res) => {
         SELECT up.id, up.material_id, up.user_id, up.mode, up.current_index, up.score, up.is_completed, up.updated_at
         FROM user_progress up
         INNER JOIN (
-          SELECT material_id, user_id, MAX(id) as max_id
+          SELECT material_id, user_id, MAX(updated_at) as max_updated
           FROM user_progress
           GROUP BY material_id, user_id
-        ) latest ON up.id = latest.max_id
+        ) latest ON up.material_id = latest.material_id AND up.user_id = latest.user_id AND up.updated_at = latest.max_updated
       ) p ON p.material_id = m.id AND p.user_id = m.user_id
       WHERE m.user_id = ?
       ORDER BY m.updated_at DESC
@@ -350,12 +350,12 @@ app.get('/api/progress/:materialId', requireAuth, async (req, res) => {
   }
 });
 
-// حفظ أو تحديث تقدم الاختبار لحظياً
+// حفظ أو تحديث تقدم الاختبار والمذاكرة لحظياً
 app.post('/api/progress', requireAuth, async (req, res) => {
   try {
     const {
       materialId,
-      mode = 'speed',
+      mode = 'quiz',
       currentIndex = 0,
       score = 0,
       totalQuestions = 0,
@@ -376,6 +376,7 @@ app.post('/api/progress', requireAuth, async (req, res) => {
         (user_id, material_id, mode, current_index, score, total_questions, correct_count, wrong_count, state_json, is_completed, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
        ON DUPLICATE KEY UPDATE
+        mode = VALUES(mode),
         current_index = VALUES(current_index),
         score = VALUES(score),
         total_questions = VALUES(total_questions),
@@ -385,6 +386,12 @@ app.post('/api/progress', requireAuth, async (req, res) => {
         is_completed = VALUES(is_completed),
         updated_at = NOW()`,
       [req.user.id, materialId, mode, currentIndex, score, totalQuestions, correctCount, wrongCount, stateJson, isCompleted ? 1 : 0]
+    );
+
+    // إزالة السجلات المتضاربة لأنماط سابقة لنفس المادة والمستخدم لضمان اتساق مؤشر التقدم
+    await query(
+      `DELETE FROM user_progress WHERE user_id = ? AND material_id = ? AND mode != ?`,
+      [req.user.id, materialId, mode]
     );
 
     res.json({ success: true, message: 'تم حفظ التقدم بنجاح' });
