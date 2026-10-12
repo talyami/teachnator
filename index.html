@@ -1935,13 +1935,24 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
     };
 
     // مراجعة وتقييم إجابة الطالب عبر نموذج الذكاء الاصطناعي بمعيار 85% الصارم
-    const evaluateShortAnswerWithAi = async ({ questionText, expectedAnswer, studentAnswer, hint, language = getContentLanguage(questionText) }) => {
+    const evaluateShortAnswerWithAi = async ({ questionText, expectedAnswer, studentAnswer, hint, language = getContentLanguage(questionText), materialId = null, generationId = null }) => {
+
+      const effectiveMaterialId = materialId || activeMaterialContext?.materialId || null;
+      const effectiveGenerationId = generationId || activeMaterialContext?.generationId || null;
+      const hasValidContext = Boolean(effectiveMaterialId || effectiveGenerationId);
+
+      // إذا لم تكن المادة مسجلة ومحفوظة على الخادم (مثل أسئلة التجربة النموذجية Demo أو جلسة بدون حفظ)، يتم التقييم الفوري محلياً دون إرسال طلب خادم
+      if (!hasValidContext) {
+        return localEvaluateShortAnswer(expectedAnswer, studentAnswer, language);
+      }
 
       try {
         // The server builds the grading prompt from structured answer data.
         const data = await requestAiCompletion({
           purpose: 'brain',
           operation: 'evaluate',
+          materialId: effectiveMaterialId,
+          generationId: effectiveGenerationId,
           evaluation: { questionText, expectedAnswer, studentAnswer, hint: hint || '', language }
         });
 
@@ -1966,8 +1977,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
           revisedAnswer: parsed.revisedAnswer || expectedAnswer
         };
       } catch (e) {
-        console.warn("AI evaluation warning, falling back to local evaluator:", e);
-        window.__reportAppError?.('AI evaluation', `${e.message} — ${translateUi('تم استخدام التقييم المحلي الاحتياطي.')}`);
+        console.warn("AI evaluation warning, falling back to local evaluator:", e.message || e);
         return localEvaluateShortAnswer(expectedAnswer, studentAnswer, language);
       }
     };
@@ -4235,7 +4245,9 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
           expectedAnswer: currentQ.expectedAnswer,
           studentAnswer: studentShortAnswer.trim(),
           hint: currentQ.hint,
-          language: getContentLanguage(currentQ)
+          language: getContentLanguage(currentQ),
+          materialId: currentMaterialId,
+          generationId: completedGenerationId
         });
 
         // Ignore an AI result from a quiz that the student has left or restarted.
