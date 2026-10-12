@@ -698,6 +698,29 @@
       }
     };
 
+    // فك قيود الصوت نهائياً في Safari على أجهزة iPad / iPhone عند أول لمس أو نقر للمستخدم
+    const unlockAudio = () => {
+      try {
+        initAudio();
+        if (audioCtx) {
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+          const silentBuffer = audioCtx.createBuffer(1, 1, 22050);
+          const source = audioCtx.createBufferSource();
+          source.buffer = silentBuffer;
+          source.connect(audioCtx.destination);
+          source.start(0);
+        }
+      } catch (_) {}
+    };
+
+    if (typeof window !== 'undefined') {
+      ['touchstart', 'touchend', 'click', 'keydown'].forEach(evt => {
+        document.addEventListener(evt, unlockAudio, { passive: true, capture: true });
+      });
+    }
+
     const playTone = (freq, type, duration, vol = 0.1) => {
       if (!audioCtx) return;
       try {
@@ -998,8 +1021,17 @@
     const getGuestDevice = () => {
       let id = localStorage.getItem('guest_device_id');
       if (!id) {
-        id = crypto.randomUUID();
-        localStorage.setItem('guest_device_id', id);
+        try {
+          id = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+            ? crypto.randomUUID()
+            : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                const r = Math.random() * 16 | 0;
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+              });
+          localStorage.setItem('guest_device_id', id);
+        } catch (_) {
+          id = 'guest_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+        }
       }
       return id;
     };
@@ -1259,16 +1291,35 @@
       return audioBuffer;
     };
 
-    // فك تشفير الصوت مسبقاً وتجهيز AudioBuffer للتشغيل الفوري (<1ms)
+    // فك تشفير الصوت مسبقاً وتجهيز AudioBuffer للتشغيل الفوري (<1ms) مع دعم موثوق لـ Safari على iPad
     const decodeAudioDataSafely = async (arrayBuffer) => {
       try {
         initAudio();
         if (!audioCtx) return null;
+        if (audioCtx.state === 'suspended') {
+          try { await audioCtx.resume(); } catch (_) {}
+        }
         const copy = arrayBuffer.slice(0);
-        const decoded = await new Promise((resolve, reject) => {
-          audioCtx.decodeAudioData(copy, resolve, reject);
+        return await new Promise((resolve) => {
+          let resolved = false;
+          const onSuccess = (decoded) => {
+            if (!resolved) { resolved = true; resolve(decoded); }
+          };
+          const onError = () => {
+            if (!resolved) { resolved = true; resolve(null); }
+          };
+          try {
+            const promise = audioCtx.decodeAudioData(copy, onSuccess, onError);
+            if (promise && typeof promise.then === 'function') {
+              promise.then(onSuccess).catch(onError);
+            }
+          } catch (e) {
+            onError();
+          }
+          setTimeout(() => {
+            if (!resolved) { resolved = true; resolve(null); }
+          }, 3500);
         });
-        return decoded;
       } catch (err) {
         return null;
       }
@@ -1322,7 +1373,7 @@
       }
     };
 
-    // تشغيل الصوت من Base64 أو AudioBuffer بدون أي تأخير مع غلاف خفوت عتادي لمنع أي تشويش نهائي
+    // تشغيل الصوت من Base64 أو AudioBuffer بدون أي تأخير مع دعم أصيل ومضمون لأجهزة iPad و Safari
     const playBase64Audio = async (base64Data, mimeType = 'audio/wav', speechId = null, preDecodedBuffer = null, spokenText = null) => {
       try {
         initAudio();
@@ -1340,84 +1391,111 @@
 
         try { window.__onSpeechStateChange?.({ status: 'speaking', text: spokenText }); } catch(e){}
 
+        if (audioCtx && audioCtx.state === 'suspended') {
+          try { await audioCtx.resume(); } catch(e){}
+        }
+
         const playViaWebAudio = (buf) => {
-          const source = audioCtx.createBufferSource();
-          source.buffer = buf;
-          const gainNode = audioCtx.createGain();
-          gainNode.gain.setValueAtTime(1.0, audioCtx.currentTime);
-          // غلاف هبوط عتادي دقيق على آخر 70ms لضمان صفر طقطقة أو تشويش
-          const fadeStart = Math.max(0, buf.duration - 0.02);
-          gainNode.gain.setValueAtTime(1.0, audioCtx.currentTime + fadeStart);
-          gainNode.gain.linearRampToValueAtTime(0.0001, audioCtx.currentTime + buf.duration);
-          source.connect(gainNode);
-          gainNode.connect(audioCtx.destination);
-          source.onended = () => {
-            if (currentAudioSource === source) {
-              currentAudioSource = null;
-              try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
+          try {
+            if (!audioCtx) return false;
+            if (audioCtx.state === 'suspended') {
+              try { audioCtx.resume(); } catch(e){}
             }
-          };
-          source.start();
-          currentAudioSource = source;
+            const source = audioCtx.createBufferSource();
+            source.buffer = buf;
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.setValueAtTime(1.0, audioCtx.currentTime);
+            // غلاف هبوط عتادي دقيق على آخر 70ms لضمان صفر طقطقة أو تشويش
+            const fadeStart = Math.max(0, buf.duration - 0.02);
+            gainNode.gain.setValueAtTime(1.0, audioCtx.currentTime + fadeStart);
+            gainNode.gain.linearRampToValueAtTime(0.0001, audioCtx.currentTime + buf.duration);
+            source.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            source.onended = () => {
+              if (currentAudioSource === source) {
+                currentAudioSource = null;
+                try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
+              }
+            };
+            source.start();
+            currentAudioSource = source;
+            return true;
+          } catch (e) {
+            console.warn("playViaWebAudio failed:", e);
+            return false;
+          }
         };
 
-        // إذا كان الـ AudioBuffer مفكوكاً مسبقاً، نشغله فوراً بزمن 0ms
-        if (preDecodedBuffer && audioCtx && audioCtx.state !== 'suspended') {
-          playViaWebAudio(preDecodedBuffer);
+        // 1. إذا كان الـ AudioBuffer مفكوكاً مسبقاً، نشغله فوراً بزمن 0ms
+        if (preDecodedBuffer && playViaWebAudio(preDecodedBuffer)) {
           return;
         }
 
         let audioDataB64 = base64Data;
         let finalMime = mimeType || 'audio/wav';
+        let arrayBuf = null;
 
-        let audioBuffer = null;
-        if (audioCtx) {
-          try {
-            let arrayBuf = null;
-            if (finalMime.toLowerCase().includes('pcm') || finalMime.toLowerCase().includes('l16')) {
-              arrayBuf = base64PcmToWavArrayBuffer(base64Data, 24000);
-            } else {
-              arrayBuf = base64ToArrayBuffer(base64Data);
-            }
-            if (arrayBuf) {
-              audioBuffer = await decodeAudioDataSafely(arrayBuf);
-            }
-          } catch (decodeErr) {
-            console.warn("audioCtx decodeAudioData fallback to HTML Audio:", decodeErr);
+        if (finalMime.toLowerCase().includes('pcm') || finalMime.toLowerCase().includes('l16')) {
+          arrayBuf = base64PcmToWavArrayBuffer(base64Data, 24000);
+          finalMime = 'audio/wav';
+        } else {
+          arrayBuf = base64ToArrayBuffer(base64Data);
+        }
+
+        // 2. محاولة فك التشفير وتشغيله عبر Web Audio API
+        if (arrayBuf) {
+          const audioBuffer = await decodeAudioDataSafely(arrayBuf);
+          if (speechId !== null && speechId !== activeSpeechId) return;
+          if (audioBuffer && playViaWebAudio(audioBuffer)) {
+            return;
           }
         }
 
         if (speechId !== null && speechId !== activeSpeechId) return;
 
-        if (audioBuffer && audioCtx && audioCtx.state !== 'suspended') {
-          playViaWebAudio(audioBuffer);
-          return;
+        // 3. البديل عبر HTML5 Audio باستخدام Blob URL (متوافق تماماً مع iOS Safari)
+        try {
+          if (finalMime.toLowerCase().includes('pcm') || finalMime.toLowerCase().includes('l16')) {
+            audioDataB64 = pcmBase64ToWavBase64(base64Data, 24000);
+            finalMime = 'audio/wav';
+          }
+          const rawBytes = arrayBuf || base64ToArrayBuffer(audioDataB64);
+          if (rawBytes) {
+            const blob = new Blob([rawBytes], { type: finalMime });
+            const blobUrl = URL.createObjectURL(blob);
+            const audio = new Audio(blobUrl);
+            currentHtmlAudio = audio;
+            audio.onended = () => {
+              URL.revokeObjectURL(blobUrl);
+              if (currentHtmlAudio === audio) {
+                currentHtmlAudio = null;
+                try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
+              }
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(blobUrl);
+              if (currentHtmlAudio === audio) {
+                currentHtmlAudio = null;
+                try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
+              }
+            };
+            await audio.play();
+            return;
+          }
+        } catch (htmlErr) {
+          console.warn("HTML Audio playback fallback failed on iPad/Safari:", htmlErr);
         }
 
-        // تحويل PCM إلى WAV في حال استخدام مشغل المتصفح HTML5
-        if (finalMime.toLowerCase().includes('pcm') || finalMime.toLowerCase().includes('l16')) {
-          audioDataB64 = pcmBase64ToWavBase64(base64Data, 24000);
-          finalMime = 'audio/wav';
+        // 4. في حال تعذر تشغيل ملف الصوت بالكامل على الجهاز، الاستعانة بمحرك المتصفح كبديل نهائي
+        if (spokenText && (speechId === null || speechId === activeSpeechId)) {
+          speakWithWebSpeech(spokenText, speechId);
         }
-
-        const audio = new Audio(`data:${finalMime};base64,${audioDataB64}`);
-        currentHtmlAudio = audio;
-        audio.onended = () => {
-          if (currentHtmlAudio === audio) {
-            currentHtmlAudio = null;
-            try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
-          }
-        };
-        audio.onerror = () => {
-          if (currentHtmlAudio === audio) {
-            currentHtmlAudio = null;
-            try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
-          }
-        };
-        await audio.play();
       } catch (e) {
         console.warn("Audio playback failed:", e);
         try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
+        if (spokenText && (speechId === null || speechId === activeSpeechId)) {
+          speakWithWebSpeech(spokenText, speechId);
+        }
       }
     };
 
@@ -1476,7 +1554,7 @@
     };
 
     const fetchTtsAudio = async (text, signal = null, language = getContentLanguage(text)) => {
-      if (!text || (!activeMaterialContext.materialId && !activeMaterialContext.generationId)) return null;
+      if (!text) return null;
       const spokenCleanText = cleanTextForTts(text, language) || text;
       const cacheKey = `${language}_${spokenCleanText}`;
       if (voiceCache[cacheKey]) return voiceCache[cacheKey];
@@ -1490,7 +1568,11 @@
             speechConfig: { languageCode: getSpeechLocale({ language }) }
           }
         };
-        const data = await requestAiCompletion({ purpose: 'tts', operation: 'evaluate', payload, signal });
+        const contextParams = {
+          ...(activeMaterialContext?.materialId ? { materialId: activeMaterialContext.materialId } : {}),
+          ...(activeMaterialContext?.generationId ? { generationId: activeMaterialContext.generationId } : {})
+        };
+        const data = await requestAiCompletion({ purpose: 'tts', operation: 'evaluate', payload, ...contextParams, signal });
         const inlineAudio = data.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.data)?.inlineData;
         if (!inlineAudio?.data) return null;
         let audioData = inlineAudio.data;
@@ -1575,13 +1657,16 @@
         }
       };
 
+      if (!audioCtx) initAudio();
+      if (audioCtx && audioCtx.state === 'suspended') {
+        try { await audioCtx.resume(); } catch(e){}
+      }
+
       // 1. إذا كان الصوت مخزناً وجاهزاً في الذاكرة (من التحميل المسبق): تشغيل فوري بدون أي انتظار (<1ms)
       if (voiceCache[cacheKey]) {
         if (currentSpeechId !== activeSpeechId) return;
         const item = voiceCache[cacheKey];
-        if (item.buffer && audioCtx && audioCtx.state !== 'suspended') {
-          if (playDirectBuffer(item.buffer)) return;
-        }
+        if (item.buffer && playDirectBuffer(item.buffer)) return;
         await playBase64Audio(item.data, item.mimeType, currentSpeechId, item.buffer, text);
         return;
       }
@@ -1593,9 +1678,7 @@
           const item = await inFlightAudioFetches[cacheKey];
           if (currentSpeechId !== activeSpeechId) return;
           if (item) {
-            if (item.buffer && audioCtx && audioCtx.state !== 'suspended') {
-              if (playDirectBuffer(item.buffer)) return;
-            }
+            if (item.buffer && playDirectBuffer(item.buffer)) return;
             await playBase64Audio(item.data, item.mimeType, currentSpeechId, item.buffer, text);
             return;
           }
@@ -1608,9 +1691,7 @@
       if (currentSpeechId !== activeSpeechId) return;
 
       if (result) {
-        if (result.buffer && audioCtx && audioCtx.state !== 'suspended') {
-          if (playDirectBuffer(result.buffer)) return;
-        }
+        if (result.buffer && playDirectBuffer(result.buffer)) return;
         await playBase64Audio(result.data, result.mimeType, currentSpeechId, result.buffer, text);
         return;
       }
@@ -2525,9 +2606,9 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
           setShowWhy(false);
 
           setShowUserDashboard(false);
-          setMode('intro');
+          setMode('learn');
           setTimerActive(false);
-          saveProgressToDb(resumeIndex, 0, false, 'intro', sanitized);
+          saveProgressToDb(resumeIndex, 0, false, 'learn', sanitized);
           speak(sanitized[resumeIndex]);
           if (sanitized[resumeIndex + 1]) prefetch(sanitized[resumeIndex + 1]);
         } catch (e) {
@@ -3649,7 +3730,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         speak(demoSpeech);
       };
 
-      const startLearning = () => {
+      const startLearning = (targetIndex = null) => {
         cancelQuizInteraction();
         quizMemoryOpenRef.current = false;
         setQuizMemoryQuestion(null);
@@ -3666,6 +3747,9 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
           recognitionRef.current = null;
         }
         setIsListeningSpeech(false);
+        const startIdx = (typeof targetIndex === 'number' && targetIndex >= 0 && targetIndex < questionsData.length)
+          ? targetIndex
+          : (mode === 'learn' && currentIndex < questionsData.length ? currentIndex : 0);
         if (mode === 'quiz') {
           setTimeLeft(15 * 60);
           setScore(0);
@@ -3673,23 +3757,23 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
           setWrongQuestions([]);
           setShuffledQuestions([]);
           if (authToken && currentMaterialId) {
-            saveProgressToDb(0, 0, false, 'intro', questionsData);
+            saveProgressToDb(startIdx, 0, false, 'learn', questionsData);
           }
         }
         if (soundEnabled) { initAudio(); playClick(); }
         setMode('learn');
-        setCurrentIndex(0);
+        setCurrentIndex(startIdx);
         setShowHint(false);
         setIsAnswerRevealed(false);
         setShowWhy(false);
         if (timeLeft <= 0) setTimeLeft(15 * 60);
         setTimerActive(true);
-        speak(questionsData[0]);
-        if (soundEnabled && questionsData[0]) {
-          playMemoryAnchor(questionsData[0].soundAnchorId || 0);
+        speak(questionsData[startIdx]);
+        if (soundEnabled && questionsData[startIdx]) {
+          playMemoryAnchor(questionsData[startIdx].soundAnchorId || 0);
         }
-        if (questionsData[1]) {
-          prefetch(questionsData[1]);
+        if (questionsData[startIdx + 1]) {
+          prefetch(questionsData[startIdx + 1]);
         }
       };
 
@@ -4034,10 +4118,13 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
       };
 
       // ميزة الإملاء الصوتي عبر الميكروفون مع دعم فوري وموثوق لأجهزة iPad و iOS Safari
-      const toggleVoiceInput = () => {
+      const toggleVoiceInput = async () => {
         // إذا كان الميكروفون قيد التسجيل حالياً، نوقفه بهدوء
-        if (isListeningSpeech && recognitionRef.current) {
-          try { recognitionRef.current.stop(); } catch(e){}
+        if (isListeningSpeech) {
+          if (recognitionRef.current) {
+            try { recognitionRef.current.stop(); } catch(e){}
+            recognitionRef.current = null;
+          }
           setIsListeningSpeech(false);
           return;
         }
@@ -4049,37 +4136,65 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         if (!SpeechRec) {
           setErrorAnnouncement({ 
             type: 'تنبيه الميكروفون', 
-            message: 'خاصية الإملاء الصوتي غير مدعومة في هذا المتصفح. على iPad يرجى استخدام متصفح Safari والتأكد من تفعيل الميكروفون والإملاء في الإعدادات.' 
+            message: 'على أجهزة iPad يرجى استخدام متصفح Safari للتحدث مباشرة عبر الميكروفون، أو استخدام لوحة المفاتيح.' 
           });
           return;
         }
 
+        // في Safari على iPad: طلب إذن الميكروفون عبر getUserMedia لإظهار نافذة إذن النظام
+        if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
+          } catch (permErr) {
+            console.warn("Microphone permission denied:", permErr);
+            setErrorAnnouncement({
+              type: 'إذن الميكروفون في iPad',
+              message: 'يرجى السماح لـ Safari بالوصول للميكروفون من إعدادات المتصفح على iPad.'
+            });
+            return;
+          }
+        }
+
         try {
           const rec = new SpeechRec();
-          rec.lang = getSpeechLocale(shuffledQuestions[currentIndex]);
+          const currentQ = (mode === 'quiz' ? shuffledQuestions[currentIndex] : questionsData[currentIndex]);
+          rec.lang = getSpeechLocale(currentQ) || (getContentLanguage(currentQ) === 'en' ? 'en-US' : 'ar-SA');
           rec.continuous = false;
-          rec.interimResults = false;
+          rec.interimResults = true;
           rec.maxAlternatives = 1;
+
+          let accumulatedTranscript = '';
 
           rec.onstart = () => {
             setIsListeningSpeech(true);
           };
 
           rec.onresult = (evt) => {
-            const transcriptText = evt.results?.[0]?.[0]?.transcript || '';
-            if (transcriptText) {
-              setStudentShortAnswer(prev => {
-                const trimmed = transcriptText.trim();
-                if (!prev) return trimmed;
-                if (prev.includes(trimmed)) return prev;
-                return prev + ' ' + trimmed;
-              });
+            let interim = '';
+            let finalChunk = '';
+            for (let i = evt.resultIndex; i < evt.results.length; ++i) {
+              const res = evt.results[i][0];
+              if (!res) continue;
+              if (evt.results[i].isFinal) {
+                finalChunk += (finalChunk ? ' ' : '') + res.transcript.trim();
+              } else {
+                interim += res.transcript;
+              }
+            }
+            if (finalChunk) {
+              accumulatedTranscript = (accumulatedTranscript ? accumulatedTranscript + ' ' : '') + finalChunk;
+            }
+            const textToSet = (accumulatedTranscript + (interim ? ' ' + interim : '')).trim();
+            if (textToSet) {
+              setStudentShortAnswer(textToSet);
             }
           };
 
           rec.onerror = (e) => {
             console.warn("Speech recognition error:", e);
             setIsListeningSpeech(false);
+            recognitionRef.current = null;
             if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
               setErrorAnnouncement({
                 type: 'إذن الميكروفون في iPad',
@@ -4095,6 +4210,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
 
           rec.onend = () => {
             setIsListeningSpeech(false);
+            recognitionRef.current = null;
           };
 
           recognitionRef.current = rec;
@@ -4102,6 +4218,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         } catch(e) {
           console.warn("Speech recognition start failed:", e);
           setIsListeningSpeech(false);
+          recognitionRef.current = null;
         }
       };
 

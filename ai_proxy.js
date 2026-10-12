@@ -125,7 +125,9 @@ async function handleAiGenerate(user, requestBody, context = {}) {
     owner = materialQuota.ownerFor(user, context.guestDevice);
     if (purpose === 'tts') {
       if (operation !== 'evaluate') throw fail(400, 'TTS requires operation evaluate.');
-      await materialQuota.authorizeExisting(owner, requestBody);
+      if (requestBody.materialId || requestBody.generationId) {
+        await materialQuota.authorizeExisting(owner, requestBody);
+      }
     } else if (operation === 'evaluate') {
       await materialQuota.authorizeExisting(owner, requestBody);
     } else {
