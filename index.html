@@ -1578,7 +1578,7 @@
           ...(activeMaterialContext?.materialId ? { materialId: activeMaterialContext.materialId } : {}),
           ...(activeMaterialContext?.generationId ? { generationId: activeMaterialContext.generationId } : {})
         };
-        const data = await requestAiCompletion({ purpose: 'tts', operation: 'evaluate', payload, ...contextParams, signal });
+        const data = await requestAiCompletion({ purpose: 'tts', payload, ...contextParams, signal });
         const inlineAudio = data.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.data)?.inlineData;
         if (!inlineAudio?.data) return null;
         let audioData = inlineAudio.data;
@@ -1599,8 +1599,7 @@
         return result;
       } catch (err) {
         if (err.name !== 'AbortError') {
-          console.warn('Server narration unavailable:', err);
-          window.__reportAppError?.('Audio / API Error', err.message);
+          console.warn('Server narration unavailable:', err.message || err);
         }
         return null;
       }

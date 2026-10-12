@@ -25,6 +25,8 @@ async function requestJson(url, headers, payload) {
       redirect: 'error'
     });
     if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      console.warn(`Upstream error ${response.status} from ${url.split('?')[0]}:`, errText.slice(0, 300));
       throw fail(response.status === 429 ? 429 : 502,
         response.status === 429 ? 'مزود الذكاء الاصطناعي مشغول، حاول لاحقاً.' : 'تعذر إتمام الطلب لدى مزود الذكاء الاصطناعي.');
     }
@@ -75,11 +77,12 @@ async function getServerAiCredentials() {
 function buildGoogleRequestConfig(provider, modelName, apiKey, vertexConfig) {
   if (provider === 'vertex') {
     const { project, region, key, token } = vertexConfig || {};
-    const loc = String(region || 'global').trim().toLowerCase();
+    let loc = String(region || 'us-central1').trim().toLowerCase();
+    if (loc === 'global' || !loc) loc = 'us-central1';
     if (!/^[a-z0-9][a-z0-9.:-]*$/i.test(project || '') || !/^[a-z0-9-]+$/.test(loc)) {
       throw fail(503, 'إعدادات خدمة الصوت غير مكتملة.');
     }
-    const host = (loc === 'global') ? 'aiplatform.googleapis.com' : `${loc}-aiplatform.googleapis.com`;
+    const host = `${loc}-aiplatform.googleapis.com`;
     const cred = String(key || token || '').trim();
     const isBearer = cred.startsWith('ya29.') || /^bearer\s/i.test(cred);
     const cleanToken = cleanBearer(cred);
@@ -258,8 +261,11 @@ async function generateSpeech(settings, payload) {
   if (!Array.isArray(payload.contents) || !payload.contents.length) throw fail(400, 'النص المطلوب تحويله إلى صوت مفقود.');
   const text = payload.contents.flatMap(content => convertParts(content?.parts, true).map(part => part.text)).join('\n');
   if (!text.trim() || text.length > 10000) throw fail(400, 'أرسل نصاً للصوت لا يتجاوز 10000 حرف.');
+  
+  // Format prompt so Gemini strictly interprets it as TTS transcript without generating text answers
+  const promptText = `Please read aloud the following text without commentary:\n${text}`;
   const fixedPayload = {
-    contents: [{ role: 'user', parts: [{ text }] }],
+    contents: [{ role: 'user', parts: [{ text: promptText }] }],
     generationConfig: {
       responseModalities: ['AUDIO'],
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: settings.ttsVoice } } }
@@ -278,8 +284,8 @@ async function generateSpeech(settings, payload) {
   ].map(k => String(k || '').trim()).filter(Boolean).filter((k, idx, arr) => arr.indexOf(k) === idx);
 
   const candidateGeminiModels = [
-    settings.ttsModel,
     'gemini-2.5-flash-preview-tts',
+    settings.ttsModel,
     'gemini-3.1-flash-tts-preview',
     'gemini-3.8-flash-tts'
   ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx);
@@ -303,20 +309,25 @@ async function generateSpeech(settings, payload) {
             return { candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: audio.inlineData.mimeType, data: audio.inlineData.data } }] } }] };
           } catch (error) {
             lastError = error;
-            // If quota is exhausted (429) on this key, try the next key
-            if (error.status === 429) break;
+            // Try next model for this key before switching keys
+            continue;
           }
         }
       }
     } else {
-      try {
-        const { url, headers } = buildGoogleRequestConfig('vertex', settings.ttsModel, null, settings.vertexConfig);
-        const data = await requestJson(url, headers, fixedPayload);
-        const audio = data?.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.mimeType?.startsWith('audio/') && typeof part.inlineData.data === 'string' && part.inlineData.data);
-        if (!audio) throw fail(502, 'لم يرجع مزود الصوت ملفاً صوتياً صالحاً.');
-        // Return only the audio contract, not arbitrary upstream metadata/errors.
-        return { candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: audio.inlineData.mimeType, data: audio.inlineData.data } }] } }] };
-      } catch (error) { lastError = error; }
+      for (const model of candidateGeminiModels) {
+        try {
+          const { url, headers } = buildGoogleRequestConfig('vertex', model, null, settings.vertexConfig);
+          const data = await requestJson(url, headers, fixedPayload);
+          const audio = data?.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.mimeType?.startsWith('audio/') && typeof part.inlineData.data === 'string' && part.inlineData.data);
+          if (!audio) throw fail(502, 'لم يرجع مزود الصوت ملفاً صوتياً صالحاً.');
+          // Return only the audio contract, not arbitrary upstream metadata/errors.
+          return { candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: audio.inlineData.mimeType, data: audio.inlineData.data } }] } }] };
+        } catch (error) {
+          lastError = error;
+          continue;
+        }
+      }
     }
   }
   throw lastError;
