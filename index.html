@@ -337,6 +337,8 @@
       'لم يبدأ بعد': 'Not started',
       'استئناف': 'Resume',
       'بدء الاختبار': 'Start quiz',
+      'مذاكرة': 'Study',
+      'مذاكرة المادة': 'Study material',
       'حذف': 'Delete',
       'تسجيل الخروج': 'Sign out',
       'إغلاق': 'Close',
@@ -484,6 +486,8 @@
       'الإجابة النموذجية المعتمدة:': 'Reference answer:',
       'الرابط البصري التخيلي (تخيل المشهد بعينيك الآن):': 'Imaginary visual link (picture the scene now):',
       'سر الفكرة (لماذا؟):': 'The idea behind it (why?):',
+      'سر الحفظ السحري 🪄': 'Magical memory secret 🪄',
+      'مفتاح الحفظ:': 'Memory key:',
       'تقييمك الذاتي السريع:': 'Your quick self-assessment:',
       'حفظت المعلومة وأصبحت راسخة في ذهني': 'I memorized this and it is firmly in my mind',
       'حفظتها وسهلة! 🚀': 'Got it — easy! 🚀',
@@ -1733,6 +1737,23 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
       return q.text || '';
     };
 
+    // تجميع نص سر الحفظ السحري (المفتاح + الرابط البصري + سر الفكرة) للنطق الصوتي التلقائي المتكامل
+    const getMagicalMemorySecretSpeech = (q) => {
+      if (!q) return '';
+      const isAr = getContentLanguage(q).startsWith('ar');
+      const parts = [];
+      if (q.hint) {
+        parts.push(q.hint);
+      }
+      if (q.visualSketch) {
+        parts.push(isAr ? `الرابط البصري: ${q.visualSketch}` : `Visual link: ${q.visualSketch}`);
+      }
+      if (q.whyExplanation) {
+        parts.push(isAr ? `سر الفكرة: ${q.whyExplanation}` : `The idea: ${q.whyExplanation}`);
+      }
+      return parts.join('، ');
+    };
+
     // تسوية ومعالجة النصوص العربية للمقارنة الذكية والتقييم المحلي
     const normalizeArabicText = (text) => {
       if (!text) return '';
@@ -2396,50 +2417,108 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         }
       };
 
-      // استئناف مادة واختبار من قاعدة البيانات
-      const handleResumeMaterial = async (mat) => {
+      // جلب بيانات وأسئلة المادة من الخادم
+      const fetchMaterialData = async (matId) => {
+        const res = await fetch(getApiUrl(`/api/materials/${matId}`), {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await res.json();
+        if (data.success && data.material) {
+          const rawQuestions = data.material.questions || [];
+          const sanitized = rawQuestions.map(normalizeQuestion).filter(Boolean);
+          if (sanitized.length === 0) {
+            alert(translateUi('المادة المحددة لا تحتوي على أسئلة صالحة'));
+            return null;
+          }
+          return { material: data.material, sanitized };
+        }
+        throw new Error(data.message || 'Failed to load material');
+      };
+
+      // بدء أو استئناف الاختبار للمادة من القائمة المحفوظة
+      const handleResumeQuiz = async (mat) => {
         if (!mat || !mat.id) return;
         try {
-          const res = await fetch(getApiUrl(`/api/materials/${mat.id}`), {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-          });
-          const data = await res.json();
-          if (data.success && data.material) {
-            const rawQuestions = data.material.questions || [];
-            const sanitized = rawQuestions.map(normalizeQuestion).filter(Boolean);
-            if (sanitized.length === 0) {
-              alert(translateUi('المادة المحددة لا تحتوي على أسئلة صالحة'));
-              return;
-            }
+          const result = await fetchMaterialData(mat.id);
+          if (!result || identityRef.current !== authToken) return;
+          const { sanitized } = result;
 
-            if (identityRef.current !== authToken) return;
-            setCurrentMaterialId(mat.id);
-            setCompletedGenerationId(null);
-            activeMaterialContext = { materialId: mat.id };
-            setQuestionsData(sanitized);
-            setAllOriginalQuestions(sanitized);
+          setCurrentMaterialId(mat.id);
+          setCompletedGenerationId(null);
+          activeMaterialContext = { materialId: mat.id };
+          setQuestionsData(sanitized);
+          setAllOriginalQuestions(sanitized);
 
-            const resumeIndex = (typeof mat.current_index === 'number' && mat.current_index < sanitized.length) ? mat.current_index : 0;
-            const resumeScore = (typeof mat.score === 'number') ? mat.score : 0;
+          const progressIndex = typeof mat.progress?.current_index === 'number'
+            ? mat.progress.current_index
+            : (typeof mat.current_index === 'number' ? mat.current_index : null);
+          const isCompleted = mat.progress?.is_completed === 1 || mat.is_completed === 1;
+          const resumeIndex = (!isCompleted && progressIndex !== null && progressIndex < sanitized.length) ? progressIndex : 0;
+          const resumeScore = typeof mat.progress?.score === 'number'
+            ? mat.progress.score
+            : (typeof mat.score === 'number' ? mat.score : 0);
 
-            const shuffled = [...sanitized];
-            setShuffledQuestions(shuffled);
-            setCurrentIndex(resumeIndex);
-            setScore(resumeScore);
-            setSelectedAnswer(null);
-            setIsAnswerChecked(false);
-            setStudentShortAnswer('');
-            setShortAnswerEvaluation(null);
+          const shuffled = prepareQuizQuestions(sanitized);
+          setShuffledQuestions(shuffled);
+          setCurrentIndex(resumeIndex);
+          setScore(resumeScore);
+          setSelectedAnswer(null);
+          setFillBlankSelected(null);
+          setStudentShortAnswer('');
+          setShortAnswerEvaluation(null);
+          setIsEvaluatingShortAnswer(false);
+          setIsAnswerChecked(false);
+          setConsecutiveStreak(0);
+          setTimeLeft(15 * 60);
 
-            setShowUserDashboard(false);
-            setMode('quiz');
-            setTimerActive(true);
-            speak(shuffled[resumeIndex]);
-          }
+          setShowUserDashboard(false);
+          setMode('quiz');
+          setTimerActive(true);
+          saveProgressToDb(resumeIndex, resumeScore, false, 'quiz', shuffled);
+          speak(shuffled[resumeIndex]);
+          if (shuffled[resumeIndex + 1]) prefetch(shuffled[resumeIndex + 1]);
         } catch (e) {
-          alert(translateUi('تعذر استئناف المادة:') + ' ' + translateUiError(e.message));
+          alert(translateUi('تعذر استئناف الاختبار:') + ' ' + translateUiError(e.message));
         }
       };
+
+      // بدء مذاكرة المادة من البداية
+      const handleStartStudyMaterial = async (mat) => {
+        if (!mat || !mat.id) return;
+        try {
+          const result = await fetchMaterialData(mat.id);
+          if (!result || identityRef.current !== authToken) return;
+          const { sanitized } = result;
+
+          setCurrentMaterialId(mat.id);
+          setCompletedGenerationId(null);
+          activeMaterialContext = { materialId: mat.id };
+          setQuestionsData(sanitized);
+          setAllOriginalQuestions(sanitized);
+          setShuffledQuestions([...sanitized]);
+          setCurrentIndex(0);
+          setScore(0);
+          setSelectedAnswer(null);
+          setFillBlankSelected(null);
+          setStudentShortAnswer('');
+          setShortAnswerEvaluation(null);
+          setIsEvaluatingShortAnswer(false);
+          setIsAnswerChecked(false);
+          setShowHint(false);
+          setIsAnswerRevealed(false);
+          setShowWhy(false);
+
+          setShowUserDashboard(false);
+          setMode('intro');
+          setTimerActive(false);
+          speak(sanitized[0]);
+          if (sanitized[1]) prefetch(sanitized[1]);
+        } catch (e) {
+          alert(translateUi('تعذر بدء مذاكرة المادة:') + ' ' + translateUiError(e.message));
+        }
+      };
+
+      const handleResumeMaterial = handleResumeQuiz;
 
       // حذف مادة محفوظة
       const handleDeleteMaterial = async (matId) => {
@@ -3616,6 +3695,9 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         }
         if (timeLeft <= 0) setTimeLeft(15 * 60);
         setTimerActive(true);
+        if (authToken && currentMaterialId) {
+          saveProgressToDb(0, 0, false, 'quiz', shuffled);
+        }
         speak(shuffled[0]);
         if (soundEnabled && shuffled[0]) {
           playMemoryAnchor(shuffled[0].soundAnchorId || 0);
@@ -4482,8 +4564,16 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                     ) : (
                       <div className="space-y-3">
                         {userMaterials.map((mat) => {
-                          const hasProgress = mat.progress && mat.progress.current_index > 0;
-                          const isCompleted = mat.progress?.is_completed === 1;
+                          const progressObj = mat.progress;
+                          const progressIndex = typeof progressObj?.current_index === 'number'
+                            ? progressObj.current_index
+                            : (typeof mat.current_index === 'number' ? mat.current_index : null);
+                          const isCompleted = (progressObj?.is_completed === 1) || (mat.is_completed === 1);
+                          const score = typeof progressObj?.score === 'number'
+                            ? progressObj.score
+                            : (typeof mat.score === 'number' ? mat.score : 0);
+                          const totalCount = mat.question_count || mat.total_questions || 0;
+                          const hasStarted = progressIndex !== null && !isNaN(progressIndex);
 
                           return (
                             <div key={mat.id} className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-sm transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -4491,7 +4581,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                                 <div className="flex items-center gap-2">
                                   <span dir="auto" className="font-black text-slate-800 text-sm truncate">{mat.title}</span>
                                   <span className="text-[10px] bg-indigo-50 text-indigo-600 font-bold px-2 py-0.5 rounded-full shrink-0">
-                                    {mat.question_count} {t('سؤال')}
+                                    {totalCount} {t('سؤال')}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
@@ -4499,12 +4589,12 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                                   {isCompleted ? (
                                     <span className="text-emerald-600 font-bold flex items-center gap-1">
                                       <i className="fa-solid fa-trophy text-amber-500"></i>
-                                      {t('مكتمل')} ({mat.progress.score}/{mat.question_count})
+                                      {t('مكتمل')} ({score}/{totalCount})
                                     </span>
-                                  ) : hasProgress ? (
+                                  ) : hasStarted ? (
                                     <span className="text-amber-600 font-bold flex items-center gap-1">
                                       <i className="fa-solid fa-clock-rotate-left"></i>
-                                      {t('متوقف عند السؤال')} {mat.progress.current_index + 1}
+                                      {t('متوقف عند السؤال')} {progressIndex + 1}
                                     </span>
                                   ) : (
                                     <span className="text-slate-500">{t('لم يبدأ بعد')}</span>
@@ -4514,13 +4604,25 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
 
                               <div className="flex items-center gap-2 shrink-0">
                                 <button
-                                  onClick={() => handleResumeQuiz(mat)}
-                                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                                  type="button"
+                                  onClick={() => handleStartStudyMaterial(mat)}
+                                  className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                                  title={t('مذاكرة المادة')}
                                 >
-                                  <i className="fa-solid fa-play text-[11px]"></i>
-                                  <span>{hasProgress && !isCompleted ? t('استئناف') : t('بدء الاختبار')}</span>
+                                  <i className="fa-solid fa-graduation-cap text-[11px]"></i>
+                                  <span>{t('مذاكرة')}</span>
                                 </button>
                                 <button
+                                  type="button"
+                                  onClick={() => handleResumeQuiz(mat)}
+                                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                                  title={hasStarted && !isCompleted ? t('استئناف') : t('بدء الاختبار')}
+                                >
+                                  <i className="fa-solid fa-play text-[11px]"></i>
+                                  <span>{hasStarted && !isCompleted ? t('استئناف') : t('بدء الاختبار')}</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => handleDeleteMaterial(mat.id)}
                                   className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition cursor-pointer"
                                   title={t('حذف')}
@@ -5697,28 +5799,6 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                             </div>
                           )}
 
-                          {/* الرابط البصري الخيالي (Dual Coding Theory - Allan Paivio) */}
-                          {questionsData[currentIndex].visualSketch && (
-                            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-50 via-indigo-50 to-pink-50 border border-purple-200 text-purple-950 text-right text-xs sm:text-sm leading-relaxed flex items-start gap-2.5 shadow-xs">
-                              <span className="text-xl shrink-0">🎨</span>
-                              <div>
-                                <span className="font-black text-purple-900 block mb-0.5">{t('الرابط البصري التخيلي (تخيل المشهد بعينيك الآن):')}</span>
-                                <p dir="auto" lang={getContentLanguage(questionsData[currentIndex])} className="font-semibold text-slate-700">{questionsData[currentIndex].visualSketch}</p>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* سر الفكرة والتعليل الذاتي (Elaborative Interrogation) */}
-                          {questionsData[currentIndex].whyExplanation && (
-                            <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-amber-950 text-right text-xs leading-relaxed flex items-start gap-2">
-                              <span className="text-base shrink-0">💡</span>
-                              <div>
-                                <span className="font-black text-amber-900">{t('سر الفكرة (لماذا؟):')} </span>
-                                <p dir="auto" lang={getContentLanguage(questionsData[currentIndex])} className="font-semibold text-amber-900/90">{questionsData[currentIndex].whyExplanation}</p>
-                              </div>
-                            </div>
-                          )}
-
                           {/* أزرار التقييم والتثبيت الخفي (Stealth Spaced Repetition / Metacognitive Calibration) */}
                           <div className="pt-2 flex items-center gap-2 border-t border-slate-200">
                             <span className="text-[11px] font-bold text-slate-500 ml-auto hidden sm:inline">{t('تقييمك الذاتي السريع:')}</span>
@@ -5743,22 +5823,84 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                       )}
                     </div>
 
-                    {/* زر وبطاقة مفتاح الحفظ السحري (Voice assistant Mnemonic Key) */}
+                    {/* زر وبطاقة مفتاح الحفظ السحري (Voice assistant Mnemonic Key, Visual Link & Idea) */}
                     {!showHint ? (
                       <button 
+                        type="button"
                         onClick={() => {
                           if (soundEnabled) { playClick(); playSparkleTone(); }
                           setShowHint(true);
-                          speak(questionsData[currentIndex].hint, false, getContentLanguage(questionsData[currentIndex]));
+                          const secretSpeech = getMagicalMemorySecretSpeech(questionsData[currentIndex]);
+                          speak(secretSpeech, true, getContentLanguage(questionsData[currentIndex]));
                         }}
                         className="w-full py-3.5 bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-500 hover:to-orange-500 text-amber-950 font-black text-sm sm:text-base rounded-2xl transition flex justify-center items-center gap-2 shadow-md active:scale-95 shrink-0 cursor-pointer"
                       >
                         <i className="fa-solid fa-wand-magic-sparkles"></i> {t('اضغط لاكتشاف السر السحري للحفظ! 🪄')}
                       </button>
                     ) : (
-                      <div dir="auto" className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-2xl text-amber-900 font-extrabold text-sm sm:text-base text-center leading-relaxed shadow-sm shrink-0 relative animate-in fade-in duration-200">
-                        {renderSpeakerButton(questionsData[currentIndex].hint, 'absolute top-2 left-2 text-amber-700 hover:text-amber-950')}
-                        {questionsData[currentIndex].hint}
+                      <div dir="auto" className="p-4 sm:p-5 bg-gradient-to-br from-amber-50 via-orange-50 to-purple-50 border-2 border-amber-300 rounded-3xl text-slate-800 shadow-md shrink-0 space-y-3.5 animate-in fade-in duration-200">
+                        <div className="flex items-center justify-between pb-2 border-b border-amber-200/70">
+                          <div className="flex items-center gap-2 text-amber-900 font-black text-sm sm:text-base">
+                            <i className="fa-solid fa-wand-magic-sparkles text-amber-500"></i>
+                            <span>{t('سر الحفظ السحري 🪄')}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {renderSpeakerButton(getMagicalMemorySecretSpeech(questionsData[currentIndex]), 'text-amber-800 hover:text-amber-950')}
+                            <button
+                              type="button"
+                              onClick={() => setShowHint(false)}
+                              className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-amber-100/60 flex items-center justify-center transition cursor-pointer text-xs"
+                              title={t('إخفاء')}
+                            >
+                              <i className="fa-solid fa-chevron-up"></i>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* مفتاح الحفظ (Hint / Mnemonic) */}
+                        {questionsData[currentIndex]?.hint && (
+                          <div className="p-3.5 rounded-2xl bg-white/80 border border-amber-200 text-amber-950 text-right text-xs sm:text-sm leading-relaxed shadow-xs">
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <span className="font-black text-amber-900 flex items-center gap-1.5">
+                                <span>✨</span> {t('مفتاح الحفظ:')}
+                              </span>
+                              {renderSpeakerButton(questionsData[currentIndex].hint, 'text-amber-700 hover:text-amber-900 -mt-1')}
+                            </div>
+                            <p dir="auto" lang={getContentLanguage(questionsData[currentIndex])} className="font-extrabold text-amber-950 text-sm sm:text-base leading-relaxed">
+                              {questionsData[currentIndex].hint}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* الرابط البصري التخيلي (Imaginary visual link) */}
+                        {questionsData[currentIndex]?.visualSketch && (
+                          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-50 via-indigo-50 to-pink-50 border border-purple-200 text-purple-950 text-right text-xs sm:text-sm leading-relaxed shadow-xs">
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <span className="font-black text-purple-900 flex items-center gap-1.5">
+                                <span className="text-base">🎨</span> {t('الرابط البصري التخيلي (تخيل المشهد بعينيك الآن):')}
+                              </span>
+                              {renderSpeakerButton(questionsData[currentIndex].visualSketch, 'text-purple-700 hover:text-purple-900 -mt-1')}
+                            </div>
+                            <p dir="auto" lang={getContentLanguage(questionsData[currentIndex])} className="font-bold text-slate-800 text-xs sm:text-sm leading-relaxed">
+                              {questionsData[currentIndex].visualSketch}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* سر الفكرة والتعليل الذاتي (The idea behind it) */}
+                        {questionsData[currentIndex]?.whyExplanation && (
+                          <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-200/90 text-amber-950 text-right text-xs sm:text-sm leading-relaxed shadow-xs">
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <span className="font-black text-amber-900 flex items-center gap-1.5">
+                                <span className="text-base">💡</span> {t('سر الفكرة (لماذا؟):')}
+                              </span>
+                              {renderSpeakerButton(questionsData[currentIndex].whyExplanation, 'text-amber-800 hover:text-amber-950 -mt-1')}
+                            </div>
+                            <p dir="auto" lang={getContentLanguage(questionsData[currentIndex])} className="font-bold text-amber-950/90 text-xs sm:text-sm leading-relaxed">
+                              {questionsData[currentIndex].whyExplanation}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

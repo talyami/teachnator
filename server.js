@@ -238,12 +238,32 @@ app.get('/api/materials', requireAuth, async (req, res) => {
       SELECT m.id, m.title, m.content_preview, m.source_filename, m.total_questions, m.created_at, m.updated_at,
              p.mode as last_mode, p.current_index, p.score, p.is_completed, p.updated_at as last_played_at
       FROM materials m
-      LEFT JOIN user_progress p ON p.material_id = m.id AND p.user_id = m.user_id
+      LEFT JOIN (
+        SELECT up.id, up.material_id, up.user_id, up.mode, up.current_index, up.score, up.is_completed, up.updated_at
+        FROM user_progress up
+        INNER JOIN (
+          SELECT material_id, user_id, MAX(id) as max_id
+          FROM user_progress
+          GROUP BY material_id, user_id
+        ) latest ON up.id = latest.max_id
+      ) p ON p.material_id = m.id AND p.user_id = m.user_id
       WHERE m.user_id = ?
       ORDER BY m.updated_at DESC
     `;
     const rows = await query(sql, [req.user.id]);
-    res.json({ success: true, materials: rows });
+    const materials = rows.map(r => ({
+      ...r,
+      total_questions: r.total_questions || 0,
+      question_count: r.total_questions || 0,
+      progress: (r.current_index !== null && r.current_index !== undefined) ? {
+        mode: r.last_mode,
+        current_index: Number(r.current_index) || 0,
+        score: Number(r.score) || 0,
+        is_completed: Number(r.is_completed) || 0,
+        last_played_at: r.last_played_at
+      } : null
+    }));
+    res.json({ success: true, materials });
   } catch (err) {
     console.error('Fetch materials error:', err);
     res.status(500).json({ success: false, message: 'تعذر جلب المواد المحفوظة: ' + err.message });
