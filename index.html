@@ -2751,11 +2751,16 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         }
       };
 
-      // فحص إصدار التطبيق والمقارنة مع قاعدة البيانات مع دعم التحديث التلقائي
+      const lastVersionCheckRef = useRef(0);
+      // فحص إصدار التطبيق والمقارنة مع قاعدة البيانات مع دعم التحديث التلقائي (عند التركيز، إعادة الاتصال، والتنقل بين الصفحات)
       const checkAppVersion = async (isManual = false) => {
+        const now = Date.now();
+        if (!isManual && now - lastVersionCheckRef.current < 5000) return;
+        lastVersionCheckRef.current = now;
+
         try {
           if (isManual) setCheckingVersion(true);
-          const res = await fetch(getApiUrl(`/api/version?t=${Date.now()}`), { cache: 'no-store' });
+          const res = await fetch(getApiUrl(`/api/version?t=${now}`), { cache: 'no-store' });
           if (!res.ok) return;
           const data = await res.json();
           if (!data || !data.version) return;
@@ -2816,20 +2821,28 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         }
       };
 
-      // المزامنة الدورية لفحص التحديثات في الخلفية وعند العودة للتبويب
+      // فحص التحديثات عند فتح التطبيق، التركيز على النافذة/التبويب، وعند عودة الاتصال (بدون مؤقت زمني مستمر)
       useEffect(() => {
         checkAppVersion();
-        const timer = setInterval(() => checkAppVersion(), 30000);
+        const handleFocus = () => checkAppVersion();
         const handleVisibility = () => { if (!document.hidden) checkAppVersion(); };
         const handleOnline = () => checkAppVersion();
+
+        window.addEventListener('focus', handleFocus);
         document.addEventListener('visibilitychange', handleVisibility);
         window.addEventListener('online', handleOnline);
+
         return () => {
-          clearInterval(timer);
+          window.removeEventListener('focus', handleFocus);
           document.removeEventListener('visibilitychange', handleVisibility);
           window.removeEventListener('online', handleOnline);
         };
       }, []);
+
+      // فحص الإصدار تلقائياً عند التركيز والتنقل بين صفحات الواجهة ومحتوياتها
+      useEffect(() => {
+        checkAppVersion();
+      }, [mode, showAdminDashboard, showUserDashboard, showSettings]);
 
       const fetchAdminVersion = async () => {
         try {
