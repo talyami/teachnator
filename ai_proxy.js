@@ -211,20 +211,19 @@ async function generateBrain(settings, payload) {
   }
   if (Number.isFinite(config.temperature) && config.temperature >= 0 && config.temperature <= 2) body.temperature = config.temperature;
   if (Number.isFinite(config.topP) && config.topP >= 0 && config.topP <= 1) body.top_p = config.topP;
-  if (Number.isInteger(config.maxOutputTokens) && config.maxOutputTokens > 0) body.max_tokens = config.maxOutputTokens;
+  body.max_tokens = (Number.isInteger(config.maxOutputTokens) && config.maxOutputTokens > 0) ? config.maxOutputTokens : 65535;
   const data = await requestJson(url.toString(), { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body);
   const choice = data?.choices?.[0];
   const text = choice?.message?.content;
-  if (choice?.finish_reason === 'length') {
-    throw fail(502, 'توقف رد الذكاء الاصطناعي عند حد حجم الإجابة قبل اكتماله. قلّل حجم المادة أو قسّمها إلى أجزاء ثم حاول مرة أخرى.');
-  }
   if (typeof text !== 'string' || !text.trim()) throw fail(502, 'لم يرجع مزود الذكاء الاصطناعي محتوى صالحاً.');
   if (config.responseMimeType === 'application/json') {
     // Validate before settling the generation successfully or charging its quota.
-    // Never invent missing text or silently discard truncated questions.
     try {
       JSON.parse(text.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim());
     } catch (_) {
+      if (choice?.finish_reason === 'length') {
+        throw fail(502, 'توقف رد الذكاء الاصطناعي عند حد حجم الإجابة قبل اكتماله. قلّل حجم المادة أو قسّمها إلى أجزاء ثم حاول مرة أخرى.');
+      }
       throw fail(502, 'أرجع مزود الذكاء الاصطناعي إجابة غير مكتملة أو بتنسيق غير صالح. حاول مرة أخرى أو قسّم المادة إلى أجزاء أصغر.');
     }
   }

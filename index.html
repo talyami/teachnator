@@ -454,8 +454,8 @@
       'الصق نص الدرس أو ملخص الأسئلة هنا...': 'Paste the lesson text or question summary here...',
       'تحليل النص الذكي': 'Analyze text with AI',
       'لا تملك ملفاً الآن؟ جرب اختباراً نموذجياً سريعاً': 'No file right now? Try a quick sample quiz',
-      'الرجاء الانتظار لبضع دقايق، انا اقرأ المادة الذكية... ✨': 'Please wait for a few minutes, I’m reading your material... ✨',
-      'الرجاء الانتظار لبضع دقايق، انا المفتش الصارم اراجع... 🕵️♂️': 'Please wait for a few minutes, I’m carefully reviewing... 🕵️♂️',
+      'الرجاء الانتظار لبضع دقائق، انا اقرأ المادة الذكية... ✨': 'Please wait for a few minutes, I’m reading your material... ✨',
+      'الرجاء الانتظار لبضع دقائق، انا المفتش الصارم ... 🕵️♂️': 'Please wait for a few minutes, I’m carefully reviewing... 🕵️♂️',
       'أبتكر مفاتيح حفظ لا تُنسى من محتوى الملف!': 'Creating unforgettable memory hints from your file!',
       'أراجع الأسئلة، وأتأكد من دقتها 100%!': 'Reviewing the questions and checking their accuracy!',
       'تم تجهيز التحدي! 🚀': 'Your challenge is ready! 🚀',
@@ -3181,7 +3181,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
             if (revised?.length) finalQuestions = revised;
           } catch (e) {
             if (controller.signal.aborted || identityRef.current !== token) throw e;
-            revisionWarning = `${t('تعذرت المراجعة الأكاديمية؛ تم حفظ المسودة المتاحة.')} ${e.message}`;
+            console.warn('Academic revision skipped; preserved complete draft:', e.message);
           }
 
           const sanitized = (finalQuestions || []).map(normalizeQuestion).filter(Boolean);
@@ -5484,8 +5484,8 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                   <div>
                     <h2 className="text-2xl font-black text-slate-800 mb-2">
                       {generationStatus === 'drafting' 
-                        ? t('الرجاء الانتظار لبضع دقايق، انا اقرأ المادة الذكية... ✨')
-                        : t('الرجاء الانتظار لبضع دقايق، انا المفتش الصارم اراجع... 🕵️♂️')}
+                        ? t('الرجاء الانتظار لبضع دقائق، انا اقرأ المادة الذكية... ✨')
+                        : t('الرجاء الانتظار لبضع دقائق، انا المفتش الصارم ... 🕵️♂️')}
                     </h2>
                     <p className="text-slate-500 font-bold text-sm animate-pulse">
                       {generationStatus === 'drafting' 
