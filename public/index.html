@@ -5,6 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>المولد الذكي للاختبارات 🧠✨</title>
   
+  <!-- ========================================================================= -->
+  <!-- VOICE ENGINE LOCKDOWN: Permanently disable browser robotic synthesis.     -->
+  <!-- AI Voice (Gemini / Vertex) ONLY. If unavailable, NO robotic voice plays.   -->
+  <!-- ========================================================================= -->
+  <script>
+    (function enforceAiVoicePolicy() {
+      try {
+        if (typeof window !== 'undefined') {
+          window.__VOICE_POLICY__ = 'AI_ONLY_NO_ROBOT';
+          if ('speechSynthesis' in window) {
+            try { window.speechSynthesis.cancel(); } catch(e){}
+            window.speechSynthesis.speak = function() {
+              console.warn('[Voice Engine] Robotic machine voice permanently disabled. Only AI voice is permitted.');
+              try { window.speechSynthesis.cancel(); } catch(e){}
+            };
+          }
+          if (typeof window.SpeechSynthesisUtterance !== 'undefined') {
+            const _OrigUtterance = window.SpeechSynthesisUtterance;
+            window.SpeechSynthesisUtterance = function() {
+              console.warn('[Voice Engine] SpeechSynthesisUtterance blocked.');
+              return new _OrigUtterance('');
+            };
+          }
+        }
+      } catch(e){}
+    })();
+  </script>
+  
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -883,45 +911,9 @@
       }
     };
 
-    // القراءة عبر محرك المتصفح كبديل احتياطي أخير مع تفضيل الأصوات الطبيعية والسرعة المعتدلة
-    const speakWithWebSpeech = (text, speechId = null) => {
-      if (!('speechSynthesis' in window)) return;
-      if (speechId !== null && speechId !== activeSpeechId) return;
-
-      try {
-        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-        window.speechSynthesis.cancel();
-      } catch(e){}
-
-      const cleanText = text.replace(/[*_#`~\[\]]/g, '').trim();
-      const utterance = new SpeechSynthesisUtterance(cleanText);
-      utterance.lang = 'ar-SA';
-      utterance.rate = 1.0;
-
-      const voices = window.speechSynthesis.getVoices() || [];
-      const arabicVoices = voices.filter(v => v.lang === 'ar-SA' || v.lang === 'ar_SA' || (v.lang && v.lang.startsWith('ar')));
-      const naturalVoice = arabicVoices.find(v => /natural|online|neural|hamed|zariyah|shakir|tariq/i.test(v.name))
-        || arabicVoices.find(v => v.lang === 'ar-SA' || v.lang === 'ar_SA')
-        || arabicVoices[0];
-      if (naturalVoice) utterance.voice = naturalVoice;
-
-      utterance.onstart = () => {
-        try { window.__onSpeechStateChange?.({ status: 'speaking', text: cleanText }); } catch(e){}
-      };
-      utterance.onend = () => {
-        try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
-      };
-      utterance.onerror = () => {
-        try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
-      };
-
-      setTimeout(() => {
-        if (speechId !== null && speechId !== activeSpeechId) return;
-        try {
-          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-          window.speechSynthesis.speak(utterance);
-        } catch(e){}
-      }, 15);
+    // إلغاء الصوت الروبوتي الآلي تماماً والاعتماد حصرياً على صوت الذكاء الاصطناعي (وفي حال عدم توفره لا يُضاف أي صوت)
+    const speakWithWebSpeech = () => {
+      try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
     };
 
     // جلب ومعالجة الصوت من API مع التخزين المؤقت وفك التشفير في خطوة واحدة
@@ -1248,12 +1240,9 @@
         return;
       }
 
-      // 4. البديل الفوري بصوت نقي وطبيعي أو محرك المتصفح في حال تعذر الاتصال أو تجاوز الحصة
+      // 4. في حال عدم توفر صوت الذكاء الاصطناعي: لا يتم إضافة أي صوت روبوتي آلي
       if (currentSpeechId === activeSpeechId) {
-        const naturalSuccess = await speakWithNaturalOnlineVoice(text, currentSpeechId);
-        if (!naturalSuccess && currentSpeechId === activeSpeechId) {
-          speakWithWebSpeech(text, currentSpeechId);
-        }
+        try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
       }
     };
 

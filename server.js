@@ -4,7 +4,7 @@ const path = require('path');
 const { exec } = require('child_process');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
-const { initDb, query, isDbConnected } = require('./db');
+const { initDb, query, isDbConnected, getAppVersion, setAppVersion } = require('./db');
 const {
   generateToken,
   verifyGoogleToken,
@@ -620,6 +620,7 @@ app.post('/api/admin/ai-test', requireAdmin, limitAiRequests, async (req, res) =
     } else if (type === 'tts') {
       const result = await handleAiGenerate(req.user, {
         purpose: 'tts',
+        operation: 'evaluate',
         payload: {
           contents: [{ role: 'user', parts: [{ text: 'مرحباً، تم فحص الصوت بنجاح.' }] }]
         }
@@ -638,16 +639,63 @@ app.post('/api/admin/ai-test', requireAdmin, limitAiRequests, async (req, res) =
   }
 });
 
+// مسار تحديث إصدار التطبيق ونشر التحديث (Admin Only)
+app.post('/api/admin/version', requireAdmin, async (req, res) => {
+  try {
+    const { version, build, forceReload } = req.body || {};
+    const updated = await setAppVersion({ version, build, forceReload });
+    res.json({ success: true, message: 'تم تحديث إصدار التطبيق بنجاح في قاعدة البيانات (MySQL)', ...updated });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'فشل حفظ الإصدار في قاعدة البيانات: ' + err.message });
+  }
+});
+
 // ==========================================
-// 7. الإعدادات العامة للواجهة (Public Config)
+// 7. الإعدادات العامة للواجهة والتحقق من الإصدار (Public Config & Version)
 // ==========================================
 
-app.get('/api/config', (req, res) => {
+// مسار فحص الإصدار التلقائي (Public Version Check Endpoint)
+app.get('/api/version', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  try {
+    const versionInfo = await getAppVersion();
+    res.json({
+      success: true,
+      ...versionInfo,
+      audioEngine: 'ai_only_no_robot',
+      timestamp: Date.now()
+    });
+  } catch (err) {
+    res.json({
+      success: true,
+      version: '1.2.0',
+      build: '20261012-v120',
+      forceReload: false,
+      audioEngine: 'ai_only_no_robot',
+      timestamp: Date.now()
+    });
+  }
+});
+
+app.get('/api/config', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  let versionInfo = { version: '1.2.0', build: '20261012-v120', forceReload: false };
+  try {
+    versionInfo = await getAppVersion();
+  } catch (e) {}
   res.json({
     googleClientId: process.env.GOOGLE_CLIENT_ID || '',
     appleClientId: process.env.APPLE_CLIENT_ID || '',
     dbConnected: isDbConnected(),
-    allowDevLogin: process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_LOGIN === 'true'
+    allowDevLogin: process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_LOGIN === 'true',
+    version: versionInfo.version,
+    build: versionInfo.build,
+    forceReload: versionInfo.forceReload,
+    audioEngine: 'ai_only_no_robot'
   });
 });
 
@@ -671,9 +719,13 @@ app.use((error, req, res, next) => {
 // ==========================================
 
 // Serve only the original app HTML; never expose server files or secrets.
+// Enforce strict no-cache headers so browsers and CDNs never get stuck on an outdated build.
 app.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
   if (req.path === '/api' || req.path.startsWith('/api/')) return next();
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 

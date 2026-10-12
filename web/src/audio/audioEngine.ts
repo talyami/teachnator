@@ -279,37 +279,9 @@ export const setSpeechRate = (rate: number) => {
 
 export const getSpeechRate = () => currentSpeechRate;
 
-// Speech Narration helper (Web Speech API)
-export const speakText = (text: string, voiceName?: string): Promise<void> => {
-  return new Promise((resolve) => {
-    if (!('speechSynthesis' in window)) {
-      resolve();
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-
-    // Detect language of the text
-    const isArabic = /[\u0600-\u06FF]/.test(text);
-    utterance.lang = isArabic ? 'ar-SA' : 'en-US';
-    utterance.rate = currentSpeechRate;
-
-    const voices = window.speechSynthesis.getVoices();
-    if (voiceName) {
-      const match = voices.find(v => v.name === voiceName);
-      if (match) utterance.voice = match;
-    } else if (isArabic) {
-      const arVoice = voices.find(v => v.lang.startsWith('ar'));
-      if (arVoice) utterance.voice = arVoice;
-    } else {
-      const enVoice = voices.find(v => v.lang.startsWith('en'));
-      if (enVoice) utterance.voice = enVoice;
-    }
-
-    utterance.onend = () => resolve();
-    utterance.onerror = () => resolve();
-    window.speechSynthesis.speak(utterance);
-  });
+// Speech Narration: Robotic machine speech synthesis removed; depend only on AI voice (no voice if unavailable)
+export const speakText = (_text: string, _voiceName?: string): Promise<void> => {
+  return Promise.resolve();
 };
 
 export const stopSpeech = () => {

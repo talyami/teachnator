@@ -145,7 +145,10 @@ async function initDb() {
       }),
       server_tts_provider: process.env.SERVER_TTS_PROVIDER || 'gemini',
       server_tts_model: process.env.SERVER_TTS_MODEL || 'gemini-2.5-flash-preview-tts',
-      server_tts_voice: process.env.SERVER_TTS_VOICE || 'Aoede'
+      server_tts_voice: process.env.SERVER_TTS_VOICE || 'Aoede',
+      app_version: process.env.APP_VERSION || '1.2.0',
+      app_build_hash: process.env.APP_BUILD_HASH || '20261012-v120',
+      app_force_reload: process.env.APP_FORCE_RELOAD || '0'
     };
     for (const [key, value] of Object.entries(defaults)) {
       await p.query(
@@ -195,11 +198,72 @@ async function transaction(work) {
   }
 }
 
+// استرجاع إصدار التطبيق من قاعدة البيانات (مع التراجع الآمن في حال عدم الاتصال)
+const DEFAULT_APP_VERSION = '1.2.0';
+const DEFAULT_APP_BUILD = '20261012-v120';
+
+async function getAppVersion() {
+  if (isDbConnected) {
+    try {
+      const rows = await query(
+        "SELECT setting_key, setting_value, updated_at FROM admin_settings WHERE setting_key IN ('app_version', 'app_build_hash', 'app_force_reload')"
+      );
+      const settings = {};
+      let updatedAt = null;
+      for (const r of rows) {
+        settings[r.setting_key] = r.setting_value;
+        if (r.updated_at) updatedAt = r.updated_at;
+      }
+      return {
+        version: settings.app_version || DEFAULT_APP_VERSION,
+        build: settings.app_build_hash || DEFAULT_APP_BUILD,
+        forceReload: settings.app_force_reload === '1' || settings.app_force_reload === 'true',
+        updatedAt: updatedAt ? new Date(updatedAt).toISOString() : new Date().toISOString()
+      };
+    } catch (e) {
+      console.warn('⚠️ تعذر قراءة إصدار التطبيق من MySQL، سيتم استخدام القيمة الافتراضية:', e.message);
+    }
+  }
+  return {
+    version: process.env.APP_VERSION || DEFAULT_APP_VERSION,
+    build: process.env.APP_BUILD_HASH || DEFAULT_APP_BUILD,
+    forceReload: process.env.APP_FORCE_RELOAD === '1' || process.env.APP_FORCE_RELOAD === 'true',
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function setAppVersion({ version, build, forceReload } = {}) {
+  const current = await getAppVersion();
+  const newVersion = version ? String(version).trim() : current.version;
+  const newBuild = build ? String(build).trim() : Date.now().toString();
+  const newForceReload = forceReload !== undefined ? (forceReload ? '1' : '0') : (current.forceReload ? '1' : '0');
+
+  const p = getPool();
+  if (p && isDbConnected) {
+    await p.query(
+      `INSERT INTO admin_settings (setting_key, setting_value) VALUES 
+       ('app_version', ?), ('app_build_hash', ?), ('app_force_reload', ?)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()`,
+      [newVersion, newBuild, newForceReload]
+    );
+  }
+  return {
+    version: newVersion,
+    build: newBuild,
+    forceReload: newForceReload === '1',
+    updatedAt: new Date().toISOString()
+  };
+}
+
 module.exports = {
   transaction,
   getPool,
   initDb,
   query,
   isDbConnected: () => isDbConnected,
-  dbConfig
+  dbConfig,
+  getAppVersion,
+  setAppVersion,
+  DEFAULT_APP_VERSION,
+  DEFAULT_APP_BUILD
 };

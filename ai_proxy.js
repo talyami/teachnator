@@ -35,7 +35,7 @@ async function requestJson(url, headers, payload) {
   }
 }
 
-// Runtime settings are exclusively database-backed. Missing settings fail closed.
+// Runtime settings prefer MySQL when connected, and gracefully fall back to process.env.
 async function getServerAiCredentials() {
   const settings = Object.create(null);
 
@@ -46,19 +46,28 @@ async function getServerAiCredentials() {
     );
     for (const row of rows) settings[row.setting_key] = row.setting_value;
   } catch (error) {
-    throw fail(503, 'إعدادات الذكاء الاصطناعي غير متاحة حالياً.');
+    // If DB is offline or query fails, fall back to environment variables gracefully
   }
+
   let vertexConfig = {};
-  try { vertexConfig = JSON.parse(settings.server_vertex_config || '{}') || {}; } catch (error) {}
+  try {
+    const rawVertex = settings.server_vertex_config || JSON.stringify({
+      project: process.env.VERTEX_PROJECT_ID || '',
+      region: process.env.VERTEX_REGION || 'global',
+      key: process.env.VERTEX_KEY_TOKEN || ''
+    });
+    vertexConfig = JSON.parse(rawVertex || '{}') || {};
+  } catch (error) {}
+
   return {
-    brainUrl: settings.server_brain_url,
-    brainKey: settings.server_brain_api_key,
-    brainModel: settings.server_brain_model,
-    geminiKey: settings.server_gemini_api_key,
+    brainUrl: settings.server_brain_url || process.env.SERVER_BRAIN_URL || 'https://srv875806.tail759794.ts.net:10000/v1',
+    brainKey: settings.server_brain_api_key || process.env.SERVER_BRAIN_API_KEY || '',
+    brainModel: settings.server_brain_model || process.env.SERVER_BRAIN_MODEL || 'combo-gemini-flash',
+    geminiKey: settings.server_gemini_api_key || process.env.SERVER_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '',
     vertexConfig,
-    ttsProvider: settings.server_tts_provider,
-    ttsModel: settings.server_tts_model,
-    ttsVoice: settings.server_tts_voice
+    ttsProvider: settings.server_tts_provider || process.env.SERVER_TTS_PROVIDER || 'gemini',
+    ttsModel: settings.server_tts_model || process.env.SERVER_TTS_MODEL || 'gemini-2.5-flash-preview-tts',
+    ttsVoice: settings.server_tts_voice || process.env.SERVER_TTS_VOICE || 'Aoede'
   };
 }
 
@@ -87,9 +96,10 @@ function buildGoogleRequestConfig(provider, modelName, apiKey, vertexConfig) {
     return { url, headers };
   }
 
+  const cleanKey = cleanBearer(apiKey);
   return {
-    url: `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }
+    url: `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(cleanKey)}`,
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cleanKey }
   };
 }
 
@@ -124,9 +134,11 @@ async function handleAiGenerate(user, requestBody, context = {}) {
   if (!adminTest) {
     owner = materialQuota.ownerFor(user, context.guestDevice);
     if (purpose === 'tts') {
-      if (operation !== 'evaluate') throw fail(400, 'TTS requires operation evaluate.');
+      // Audio narration is a learning aid that does not consume material quota.
       if (requestBody.materialId || requestBody.generationId) {
-        await materialQuota.authorizeExisting(owner, requestBody);
+        try {
+          await materialQuota.authorizeExisting(owner, requestBody);
+        } catch (_) {}
       }
     } else if (operation === 'evaluate') {
       await materialQuota.authorizeExisting(owner, requestBody);
@@ -258,21 +270,54 @@ async function generateSpeech(settings, payload) {
   if (typeof languageCode === 'string' && /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(languageCode)) {
     fixedPayload.generationConfig.speechConfig.languageCode = languageCode;
   }
+
+  const geminiKeys = [
+    settings.geminiKey,
+    process.env.SERVER_GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY
+  ].map(k => String(k || '').trim()).filter(Boolean).filter((k, idx, arr) => arr.indexOf(k) === idx);
+
+  const candidateGeminiModels = [
+    settings.ttsModel,
+    'gemini-2.5-flash-preview-tts',
+    'gemini-3.1-flash-tts-preview',
+    'gemini-3.8-flash-tts'
+  ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx);
+
   const configured = provider => provider === 'gemini'
-    ? Boolean(String(settings.geminiKey || '').trim())
+    ? geminiKeys.length > 0
     : Boolean(settings.vertexConfig.project && String(settings.vertexConfig.key || settings.vertexConfig.token || '').trim());
   const providers = [settings.ttsProvider, settings.ttsProvider === 'gemini' ? 'vertex' : 'gemini'].filter(configured);
   if (!providers.length) throw fail(503, 'لم يتم إعداد مزود صوت متاح على الخادم.');
   let lastError;
   for (const provider of providers) {
-    try {
-      const { url, headers } = buildGoogleRequestConfig(provider, settings.ttsModel, settings.geminiKey, settings.vertexConfig);
-      const data = await requestJson(url, headers, fixedPayload);
-      const audio = data?.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.mimeType?.startsWith('audio/') && typeof part.inlineData.data === 'string' && part.inlineData.data);
-      if (!audio) throw fail(502, 'لم يرجع مزود الصوت ملفاً صوتياً صالحاً.');
-      // Return only the audio contract, not arbitrary upstream metadata/errors.
-      return { candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: audio.inlineData.mimeType, data: audio.inlineData.data } }] } }] };
-    } catch (error) { lastError = error; }
+    if (provider === 'gemini') {
+      for (const currentKey of geminiKeys) {
+        for (const model of candidateGeminiModels) {
+          try {
+            const { url, headers } = buildGoogleRequestConfig('gemini', model, currentKey, null);
+            const data = await requestJson(url, headers, fixedPayload);
+            const audio = data?.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.mimeType?.startsWith('audio/') && typeof part.inlineData.data === 'string' && part.inlineData.data);
+            if (!audio) throw fail(502, 'لم يرجع مزود الصوت ملفاً صوتياً صالحاً.');
+            // Return only the audio contract, not arbitrary upstream metadata/errors.
+            return { candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: audio.inlineData.mimeType, data: audio.inlineData.data } }] } }] };
+          } catch (error) {
+            lastError = error;
+            // If quota is exhausted (429) on this key, try the next key
+            if (error.status === 429) break;
+          }
+        }
+      }
+    } else {
+      try {
+        const { url, headers } = buildGoogleRequestConfig('vertex', settings.ttsModel, null, settings.vertexConfig);
+        const data = await requestJson(url, headers, fixedPayload);
+        const audio = data?.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.mimeType?.startsWith('audio/') && typeof part.inlineData.data === 'string' && part.inlineData.data);
+        if (!audio) throw fail(502, 'لم يرجع مزود الصوت ملفاً صوتياً صالحاً.');
+        // Return only the audio contract, not arbitrary upstream metadata/errors.
+        return { candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: audio.inlineData.mimeType, data: audio.inlineData.data } }] } }] };
+      } catch (error) { lastError = error; }
+    }
   }
   throw lastError;
 }

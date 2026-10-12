@@ -6,6 +6,34 @@
   <title>المولّد الذكي للاختبارات 🧠✨</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%234f46e5'/%3E%3Cpath d='M30 17c-7-5-14 0-14 7-7 3-8 13-2 17-1 8 9 13 16 8V17Zm4 0c7-5 14 0 14 7 7 3 8 13 2 17 1 8-9 13-16 8V17Z' fill='%23e0e7ff'/%3E%3Cpath d='M22 25c5 0 8 4 8 8m-14 8c4-4 9-2 10 2m16-18c-5 0-8 4-8 8m16 8c-4-4-9-2-10 2' fill='none' stroke='%23818cf8' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='m48 7 2 5 5 2-5 2-2 5-2-5-5-2 5-2Z' fill='%23fbbf24'/%3E%3C/svg%3E">
   
+  <!-- ========================================================================= -->
+  <!-- VOICE ENGINE LOCKDOWN: Permanently disable browser robotic synthesis.     -->
+  <!-- AI Voice (Gemini / Vertex) ONLY. If unavailable, NO robotic voice plays.   -->
+  <!-- ========================================================================= -->
+  <script>
+    (function enforceAiVoicePolicy() {
+      try {
+        if (typeof window !== 'undefined') {
+          window.__VOICE_POLICY__ = 'AI_ONLY_NO_ROBOT';
+          if ('speechSynthesis' in window) {
+            try { window.speechSynthesis.cancel(); } catch(e){}
+            window.speechSynthesis.speak = function() {
+              console.warn('[Voice Engine] Robotic machine voice permanently disabled. Only AI voice is permitted.');
+              try { window.speechSynthesis.cancel(); } catch(e){}
+            };
+          }
+          if (typeof window.SpeechSynthesisUtterance !== 'undefined') {
+            const _OrigUtterance = window.SpeechSynthesisUtterance;
+            window.SpeechSynthesisUtterance = function() {
+              console.warn('[Voice Engine] SpeechSynthesisUtterance blocked.');
+              return new _OrigUtterance('');
+            };
+          }
+        }
+      } catch(e){}
+    })();
+  </script>
+  
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -358,6 +386,13 @@
       'فحص الاتصال': 'Test connection',
       'المستخدمون والإحصائيات': 'Users & Statistics',
       'إعدادات الذكاء الاصطناعي والمفاتيح': 'AI Settings & Keys',
+      'إصدار التطبيق والتحديث التلقائي': 'App Version & Auto-Update',
+      'يوجد إصدار جديد من التطبيق ({version})! اضغط لتحديث فوري.': 'A new app version ({version}) is available! Click to update now.',
+      'تحديث الآن': 'Update Now',
+      'لاحقاً': 'Later',
+      'صوت AI حصراً': 'AI Voice Only',
+      'فحص تحديثات التطبيق وصوت الذكاء الاصطناعي': 'Check app updates and AI voice',
+      'تم تحديث وحفظ الإصدار في قاعدة البيانات بنجاح ✅': 'Version successfully updated and saved in database ✅',
       'إعدادات ومفاتيح الذكاء الاصطناعي (Database)': 'AI Settings & Keys (Database)',
       'يتم حفظ هذه البيانات مباشرة وبأمان تام داخل جدول admin_settings في قاعدة بيانات السيرفر (MySQL).': 'These settings are securely saved in the admin_settings table in MySQL.',
       'المخ العصبي وتوليد الأسئلة (Brain / OmniRoute)': 'Brain & Question Generation (OmniRoute)',
@@ -582,11 +617,11 @@
       'فشل توليد الصوت من نماذج Vertex AI': 'Could not generate audio with Vertex AI models',
       'متصل بنجاح ({latency}ms) - تم توليد صوت المساعد الصوتي السعودي عبر {model} ({voice}) بنقاء فائق! 🎧🇸🇦': 'Connected successfully ({latency}ms) — clear Saudi Voice assistant voice generated with {model} ({voice})! 🎧🇸🇦',
       'متصل بنجاح ({latency}ms) - صوت Google Cloud Text-to-Speech عالي النقاء! 🎧': 'Connected successfully ({latency}ms) — clear Google Cloud Text-to-Speech audio! 🎧',
-      'فشل توليد صوت Vertex AI ({error}) — تم التحويل لصوت المتصفح 🔊': 'Vertex AI audio generation failed ({error}) — switched to browser speech 🔊',
+      'فشل توليد صوت Vertex AI ({error})': 'Vertex AI audio generation failed ({error})',
       'لم يرجع النموذج بيانات صوتية صالحة': 'The model returned no valid audio data',
       'متصل بنجاح ({latency}ms) - صوت المساعد الصوتي عبر {model} ({voice}) جاهز بنقاء فائق!': 'Connected successfully ({latency}ms) — clear Voice assistant voice ready with {model} ({voice})!',
       'تنبيه: تجاوز مشروع Gemini API حد الإنفاق الشهري (Spending Cap) في Google AI Studio. يمكنك التبديل إلى Vertex AI ⚙️': 'Warning: your Gemini API project exceeded its monthly spending cap in Google AI Studio. You can switch to Vertex AI ⚙️',
-      'تعذر الاتصال بـ Gemini TTS ({error}) — الصوت يعمل تلقائياً عبر محرك المتصفح 🔊': 'Could not connect to Gemini TTS ({error}) — browser speech is being used automatically 🔊',
+      'تعذر الاتصال بـ Gemini TTS ({error})': 'Could not connect to Gemini TTS ({error})',
       'تجاوز مفتاح Gemini حد الإنفاق الشهري (Spending Cap). يمكنك رفع الحد من https://ai.studio/spend أو إضافة مفتاح جديد أو استخدام Vertex AI.': 'The Gemini key exceeded its monthly spending cap. Raise the limit at https://ai.studio/spend, add a new key, or use Vertex AI.',
       'يرجى إدخال مفتاح Gemini API أولاً من زر الإعدادات ⚙️، أو تسجيل الدخول إن كان حسابك مصرحاً له من المشرف.': 'Enter your Gemini API key in settings ⚙️, or sign in if an administrator has authorized your account.',
       'يرجى إدخال معرف مشروع Google Cloud ومفتاح API Key أو Token في شاشة الإعدادات ⚙️.': 'Enter your Google Cloud project ID and an API key or token in settings ⚙️.',
@@ -1486,58 +1521,19 @@
           console.warn("HTML Audio playback fallback failed on iPad/Safari:", htmlErr);
         }
 
-        // 4. في حال تعذر تشغيل ملف الصوت بالكامل على الجهاز، الاستعانة بمحرك المتصفح كبديل نهائي
-        if (spokenText && (speechId === null || speechId === activeSpeechId)) {
-          speakWithWebSpeech(spokenText, speechId);
+        // 4. في حال تعذر تشغيل ملف الصوت بالكامل على الجهاز: لا يتم إضافة أي صوت روبوتي آلي
+        if (speechId === null || speechId === activeSpeechId) {
+          try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
         }
       } catch (e) {
         console.warn("Audio playback failed:", e);
         try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
-        if (spokenText && (speechId === null || speechId === activeSpeechId)) {
-          speakWithWebSpeech(spokenText, speechId);
-        }
       }
     };
 
-    // القراءة عبر محرك المتصفح كبديل احتياطي أخير مع تفضيل الأصوات الطبيعية والسرعة المعتدلة
-    const speakWithWebSpeech = (text, speechId = null, language = getContentLanguage(text)) => {
-      if (!('speechSynthesis' in window)) return;
-      if (speechId !== null && speechId !== activeSpeechId) return;
-
-      try {
-        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-        window.speechSynthesis.cancel();
-      } catch(e){}
-
-      const cleanText = text.replace(/[*_#`~\[\]]/g, '').trim();
-      const utterance = new SpeechSynthesisUtterance(cleanText);
-      utterance.lang = getSpeechLocale({ language });
-      utterance.rate = 1.0;
-
-      const voices = window.speechSynthesis.getVoices() || [];
-      const matchingVoices = voices.filter(v => v.lang?.replace('_', '-').split('-')[0].toLowerCase() === language.split('-')[0].toLowerCase());
-      const naturalVoice = matchingVoices.find(v => /natural|online|neural|hamed|zariyah|shakir|tariq/i.test(v.name))
-        || matchingVoices.find(v => v.lang?.replace('_', '-') === utterance.lang)
-        || matchingVoices[0];
-      if (naturalVoice) utterance.voice = naturalVoice;
-
-      utterance.onstart = () => {
-        try { window.__onSpeechStateChange?.({ status: 'speaking', text: cleanText }); } catch(e){}
-      };
-      utterance.onend = () => {
-        try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
-      };
-      utterance.onerror = () => {
-        try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
-      };
-
-      setTimeout(() => {
-        if (speechId !== null && speechId !== activeSpeechId) return;
-        try {
-          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-          window.speechSynthesis.speak(utterance);
-        } catch(e){}
-      }, 15);
+    // إلغاء الصوت الروبوتي الآلي تماماً والاعتماد حصرياً على صوت الذكاء الاصطناعي (وفي حال عدم توفره لا يُضاف أي صوت)
+    const speakWithWebSpeech = () => {
+      try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
     };
 
     // جلب ومعالجة الصوت من API مع التخزين المؤقت وفك التشفير في خطوة واحدة
@@ -1696,9 +1692,9 @@
         return;
       }
 
-      // 4. البديل الفوري بصوت نقي وطبيعي أو محرك المتصفح في حال تعذر الاتصال أو تجاوز الحصة
+      // 4. في حال عدم توفر صوت الذكاء الاصطناعي أو فشل الاتصال: لا يتم تشغيل أي صوت آلي روبوتي نهائياً
       if (currentSpeechId === activeSpeechId) {
-        speakWithWebSpeech(text, currentSpeechId, language);
+        try { window.__onSpeechStateChange?.({ status: 'idle', text: null }); } catch(e){}
       }
     };
 
@@ -1807,17 +1803,18 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
     // استخراج النص الصوتي الآمن للسؤال لمنع نطق كلمة الإجابة في أسئلة إكمال الفراغ سلفاً
     const getSpokenQuestionText = (q) => {
       if (!q) return '';
+      if (typeof q === 'string') return q;
       if (isFillBlankQuestion(q)) {
-        const blank = getContentLanguage(q).startsWith('ar') ? '... فراغ ...' : ' ... ';
+        const blank = getContentLanguage(q).startsWith('ar') ? ' فَـرَاغ ' : ' ... ';
         if (q.clozeText) {
-          return q.clozeText.replace(/\[\s*_{2,}\s*\]|_{2,}/g, blank);
+          return q.clozeText.replace(/\[\s*_{2,}\s*\]|_{2,}|\[\s*\.{3,}\s*\]/g, blank);
         }
         const word = q.missingWord || q.expectedAnswer;
         if (word && q.text) {
           return q.text.replace(word.trim(), blank);
         }
       }
-      return q.text || '';
+      return q.text || q.clozeText || q.expectedAnswer || '';
     };
 
     // تجميع نص سر الحفظ السحري (المفتاح + المشهد البصري المباشر + سر الفكرة) للنطق الصوتي التلقائي المتكامل
@@ -2125,8 +2122,20 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
       return (parsed || []).map(normalizeQuestion).filter(Boolean);
     };
 
+    // ثوابت إصدار الواجهة ومحرك الصوت الحصري
+    const APP_CLIENT_VERSION = '1.2.0';
+    const APP_CLIENT_BUILD = '20261012-v120';
+
     // التطبيق الرئيسي
     function App() {
+      // حالة التحديث التلقائي وإصدار التطبيق من قاعدة البيانات
+      const [updateBanner, setUpdateBanner] = useState(null); // { version, build, message }
+      const [checkingVersion, setCheckingVersion] = useState(false);
+      const [adminDbVersion, setAdminDbVersion] = useState({ version: APP_CLIENT_VERSION, build: APP_CLIENT_BUILD, forceReload: false });
+      const [adminVersionForm, setAdminVersionForm] = useState({ version: APP_CLIENT_VERSION, build: APP_CLIENT_BUILD, forceReload: false });
+      const [isSavingVersion, setIsSavingVersion] = useState(false);
+      const [versionSaveMsg, setVersionSaveMsg] = useState('');
+
       const [uiLanguage, setUiLanguage] = useState(readUiLanguage);
       const t = (key, values) => translateUi(key, values, uiLanguage);
       const uiError = (message) => translateUiError(message, uiLanguage);
@@ -2742,6 +2751,136 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
         }
       };
 
+      // فحص إصدار التطبيق والمقارنة مع قاعدة البيانات مع دعم التحديث التلقائي
+      const checkAppVersion = async (isManual = false) => {
+        try {
+          if (isManual) setCheckingVersion(true);
+          const res = await fetch(getApiUrl(`/api/version?t=${Date.now()}`), { cache: 'no-store' });
+          if (!res.ok) return;
+          const data = await res.json();
+          if (!data || !data.version) return;
+
+          setAdminDbVersion({
+            version: data.version,
+            build: data.build || '',
+            forceReload: Boolean(data.forceReload)
+          });
+
+          const isNewVersion = data.version !== APP_CLIENT_VERSION || (data.build && data.build !== APP_CLIENT_BUILD);
+          if (isNewVersion || data.forceReload) {
+            if (data.forceReload) {
+              setUpdateBanner({
+                version: data.version,
+                build: data.build,
+                message: t('🔄 تم إطلاق تحديث فوري جديد ({version})... جاري تحديث التطبيق الآن...', { version: data.version })
+              });
+              setTimeout(() => {
+                window.location.href = window.location.pathname + '?v=' + Date.now();
+              }, 1200);
+              return;
+            }
+            setUpdateBanner({
+              version: data.version,
+              build: data.build,
+              message: t('🚀 يتوفر تحديث جديد للتطبيق ({version})! تم حظر الصوت الروبوتي وتفعيل صوت الذكاء الاصطناعي.', { version: data.version })
+            });
+            if (isManual) {
+              setAppAnnouncement({
+                type: 'update',
+                title: t('تحديث جديد متوفر'),
+                message: t('يتوفر إصدار أحدث ({version})! اضغط على زر التحديث بالأعلى.', { version: data.version }),
+                badge: 'Update',
+                icon: 'fa-cloud-arrow-down'
+              });
+            }
+          } else if (isManual) {
+            setAppAnnouncement({
+              type: 'system',
+              title: t('التطبيق محدث'),
+              message: t('أنت تستخدم أحدث إصدار بالفعل (v{version}) • محرك صوت الذكاء الاصطناعي حصراً نشط ✅', { version: APP_CLIENT_VERSION }),
+              badge: 'v' + APP_CLIENT_VERSION,
+              icon: 'fa-circle-check'
+            });
+          }
+        } catch (e) {
+          if (isManual) {
+            setAppAnnouncement({
+              type: 'error',
+              title: t('تعذر فحص التحديثات'),
+              message: t('تعذر الاتصال بخادم التحديثات حالياً. تحقق من اتصالك.'),
+              icon: 'fa-triangle-exclamation'
+            });
+          }
+        } finally {
+          if (isManual) setCheckingVersion(false);
+        }
+      };
+
+      // المزامنة الدورية لفحص التحديثات في الخلفية وعند العودة للتبويب
+      useEffect(() => {
+        checkAppVersion();
+        const timer = setInterval(() => checkAppVersion(), 30000);
+        const handleVisibility = () => { if (!document.hidden) checkAppVersion(); };
+        const handleOnline = () => checkAppVersion();
+        document.addEventListener('visibilitychange', handleVisibility);
+        window.addEventListener('online', handleOnline);
+        return () => {
+          clearInterval(timer);
+          document.removeEventListener('visibilitychange', handleVisibility);
+          window.removeEventListener('online', handleOnline);
+        };
+      }, []);
+
+      const fetchAdminVersion = async () => {
+        try {
+          const res = await fetch(getApiUrl(`/api/version?t=${Date.now()}`), { cache: 'no-store' });
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data && data.version) {
+            setAdminDbVersion({ version: data.version, build: data.build || '', forceReload: Boolean(data.forceReload) });
+            setAdminVersionForm({ version: data.version, build: data.build || '', forceReload: Boolean(data.forceReload) });
+          }
+        } catch (e) {
+          console.warn('Failed to fetch admin version:', e);
+        }
+      };
+
+      const handleSaveVersion = async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (!authToken || currentUser?.role !== 'admin') return;
+        setIsSavingVersion(true);
+        setVersionSaveMsg('');
+        try {
+          const res = await fetch(getApiUrl('/api/admin/version'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify(adminVersionForm)
+          });
+          const d = await res.json();
+          if (d.success) {
+            setAdminDbVersion({ version: d.version, build: d.build, forceReload: d.forceReload });
+            setVersionSaveMsg(t('تم تحديث وحفظ الإصدار في قاعدة البيانات بنجاح ✅'));
+            setTimeout(() => setVersionSaveMsg(''), 5000);
+            if (d.forceReload || d.version !== APP_CLIENT_VERSION) {
+              setUpdateBanner({
+                version: d.version,
+                build: d.build,
+                message: t('تم نشر الإصدار ({version}) في قاعدة البيانات بنجاح!', { version: d.version })
+              });
+            }
+          } else {
+            alert(translateUi('فشل الحفظ:') + ' ' + (d.message || ''));
+          }
+        } catch (e) {
+          alert(translateUi('فشل الحفظ:') + ' ' + translateUiError(e.message));
+        } finally {
+          setIsSavingVersion(false);
+        }
+      };
+
       // جلب بيانات لوحة تحكم المشرف (Admin Dashboard)
       const fetchAdminData = async () => {
         if (!authToken || currentUser?.role !== 'admin') return;
@@ -2750,7 +2889,8 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
           const [statsRes, usersRes] = await Promise.all([
             fetch(getApiUrl('/api/admin/stats'), { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()),
             fetch(getApiUrl(`/api/admin/users${adminSearch ? `?search=${encodeURIComponent(adminSearch)}` : ''}`), { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()),
-            fetchAdminAiSettings()
+            fetchAdminAiSettings(),
+            fetchAdminVersion()
           ]);
 
           if (identityRef.current !== authToken) return;
@@ -2810,9 +2950,10 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
       // دالة مريحة وشاملة لتشغيل الصوت الفصيح بكافة إعدادات Vertex AI و AI Studio مع حماية أسئلة الفراغ
       const speak = (input, force = false, language = getContentLanguage(input)) => {
         let text = input;
-        if (input && typeof input === 'object' && input.text) {
-          text = getSpokenQuestionText(input);
+        if (input && typeof input === 'object') {
+          text = getSpokenQuestionText(input) || input.text || input.clozeText || input.expectedAnswer || input.hint || '';
         }
+        text = typeof text === 'string' ? text.trim() : String(text || '').trim();
         if (!text) return;
         if (!force && !voiceEnabled) return;
         setSpeechState({ status: 'loading', text });
@@ -2822,9 +2963,10 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
       // عنصر واجهة موحد لأيقونات السماعة يعكس الحالات الثلاث (Loading/Pulsing, Speaking/Grey, Idle/Active)
       const renderSpeakerButton = (input, extraClasses = "") => {
         let textToSpeak = input;
-        if (input && typeof input === 'object' && input.text) {
-          textToSpeak = getSpokenQuestionText(input);
+        if (input && typeof input === 'object') {
+          textToSpeak = getSpokenQuestionText(input) || input.text || input.clozeText || input.expectedAnswer || input.hint || '';
         }
+        textToSpeak = typeof textToSpeak === 'string' ? textToSpeak.trim() : String(textToSpeak || '').trim();
         const isThisLoading = speechState.status === 'loading' && (!textToSpeak || speechState.text === textToSpeak);
         const isThisSpeaking = speechState.status === 'speaking' && (!textToSpeak || speechState.text === textToSpeak);
 
@@ -2869,9 +3011,10 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
       // دالة التحميل المسبق الفوري لصوت السؤال التالي لضمان التصفير الكامل لأي تأخير
       const prefetch = (input) => {
         let text = input;
-        if (input && typeof input === 'object' && input.text) {
-          text = getSpokenQuestionText(input);
+        if (input && typeof input === 'object') {
+          text = getSpokenQuestionText(input) || input.text || input.clozeText || input.expectedAnswer || input.hint || '';
         }
+        text = typeof text === 'string' ? text.trim() : String(text || '').trim();
         if (!text || !voiceEnabled) return;
         prefetchVoice(text, voiceEnabled, getContentLanguage(input));
       };
@@ -4852,6 +4995,18 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                     <i className="fa-solid fa-brain text-indigo-500"></i>
                     <span>{t('إعدادات الذكاء الاصطناعي والمفاتيح')}</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAdminTab('version'); fetchAdminVersion(); }}
+                    className={`pb-3 px-4 font-black text-xs sm:text-sm flex items-center gap-2 border-b-2 transition cursor-pointer ${
+                      adminTab === 'version'
+                        ? 'border-emerald-600 text-emerald-700 bg-white rounded-t-xl shadow-xs'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <i className="fa-solid fa-code-branch text-emerald-500"></i>
+                    <span>{t('إصدار التطبيق والتحديث التلقائي')}</span>
+                  </button>
                 </div>
 
                 {/* Body Content */}
@@ -5213,6 +5368,129 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                       </div>
                     </div>
                   )}
+
+                  {adminTab === 'version' && (
+                    <div className="space-y-6">
+                      {/* Top notice banner */}
+                      <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3">
+                        <i className="fa-solid fa-rotate text-emerald-600 text-lg mt-0.5"></i>
+                        <div className="text-xs text-emerald-950 space-y-1">
+                          <p className="font-bold">{t('نظام الإصدارات والتحديث التلقائي السحابي (Database Versioning)')}</p>
+                          <p className="text-emerald-800 leading-relaxed">
+                            {t('يتم حفظ رقم الإصدار في قاعدة بيانات MySQL، ويقوم متصفح كل طالب ومستخدم بالتحقق تلقائياً من الإصدار كل 30 ثانية والتحديث فوراً بدون الحاجة لمسح الذاكرة أو التحديث اليدوي.')}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Status Cards */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                          <p className="text-xs text-slate-500 font-bold mb-1">{t('الإصدار الحالي في قاعدة البيانات')}</p>
+                          <p className="text-xl font-black text-slate-800 flex items-center gap-2">
+                            <span>v{adminDbVersion.version}</span>
+                            <span className="text-xs font-mono font-normal text-slate-400">({adminDbVersion.build})</span>
+                          </p>
+                        </div>
+                        <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-200">
+                          <p className="text-xs text-indigo-600 font-bold mb-1">{t('الإصدار المشغّل حالياً في متصفحك')}</p>
+                          <p className="text-xl font-black text-indigo-700 flex items-center gap-2">
+                            <span>v{APP_CLIENT_VERSION}</span>
+                            <span className="text-xs font-mono font-normal text-indigo-400">({APP_CLIENT_BUILD})</span>
+                          </p>
+                        </div>
+                        <div className="p-4 bg-purple-50 rounded-2xl border border-purple-200">
+                          <p className="text-xs text-purple-600 font-bold mb-1">{t('محرك الصوت الصارم')}</p>
+                          <p className="text-xs font-black text-purple-900 mt-1 flex items-center gap-1.5">
+                            <i className="fa-solid fa-shield-halved text-purple-600"></i>
+                            <span>صوت AI حصراً (الروبوت محظور)</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Test Voice Button */}
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between flex-wrap gap-3">
+                        <div>
+                          <p className="font-bold text-slate-800 text-xs">{t('اختبار فوري لصوت الذكاء الاصطناعي (Gemini TTS):')}</p>
+                          <p className="text-slate-500 text-[11px]">{t('تأكد من سماع الصوت البشري الفصيح وعدم صدور أي صوت آلي روبوتي.')}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => speakText('مرحباً بك! هذا صوت الذكاء الاصطناعي المباشر، تم تعطيل الصوت الروبوتي الآلي نهائياً.')}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-xs"
+                        >
+                          <i className="fa-solid fa-volume-high"></i>
+                          <span>{t('استمع لصوت الذكاء الاصطناعي')}</span>
+                        </button>
+                      </div>
+
+                      {/* Edit Version Form */}
+                      <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
+                        <h4 className="font-black text-slate-800 text-sm flex items-center gap-2">
+                          <i className="fa-solid fa-pen-to-square text-emerald-600"></i>
+                          {t('تعديل ونشر إصدار جديد في قاعدة البيانات')}
+                        </h4>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1">{t('رقم الإصدار (Version):')}</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={adminVersionForm.version}
+                              onChange={(e) => setAdminVersionForm(prev => ({ ...prev, version: e.target.value }))}
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                              placeholder="1.2.0"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1">{t('معرّف البناء (Build / Timestamp):')}</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={adminVersionForm.build}
+                              onChange={(e) => setAdminVersionForm(prev => ({ ...prev, build: e.target.value }))}
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                              placeholder="20261012-v120"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="pt-2 flex items-center gap-3">
+                          <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={adminVersionForm.forceReload}
+                              onChange={(e) => setAdminVersionForm(prev => ({ ...prev, forceReload: e.target.checked }))}
+                              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                            />
+                            <span>{t('فرض التحديث وإعادة التحميل الفوري لجميع أجهزة الطلاب والمتصفحات')}</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Save Status Message */}
+                      {versionSaveMsg && (
+                        <div className="p-3 bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-bold flex items-center gap-2">
+                          <i className="fa-solid fa-check"></i>
+                          <span>{versionSaveMsg}</span>
+                        </div>
+                      )}
+
+                      {/* Submit Button */}
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={handleSaveVersion}
+                          disabled={isSavingVersion}
+                          className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-50 text-white font-black text-sm rounded-2xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <i className={`fa-solid ${isSavingVersion ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-up'}`}></i>
+                          <span>{isSavingVersion ? t('جاري الحفظ في MySQL...') : t('حفظ ونشر التحديث لجميع المستخدمين في قاعدة البيانات')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer */}
@@ -5387,6 +5665,34 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                 </div>
               </div>
             </header>
+
+            {/* إشعار التحديث التلقائي الفوري السحابي */}
+            {updateBanner && (
+              <div className="mx-4 sm:mx-6 mt-3 p-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 text-white rounded-2xl flex items-center justify-between gap-3 shadow-lg animate-in slide-in-from-top duration-300 z-40">
+                <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold">
+                  <i className="fa-solid fa-cloud-arrow-down text-lg animate-bounce"></i>
+                  <span>{updateBanner.message}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { window.location.href = window.location.pathname + '?v=' + Date.now(); }}
+                    className="px-3.5 py-1.5 bg-white text-emerald-800 hover:bg-emerald-50 rounded-xl text-xs font-black shadow-xs transition cursor-pointer shrink-0 flex items-center gap-1.5"
+                  >
+                    <i className="fa-solid fa-rotate-right"></i>
+                    <span>{t('تحديث الآن')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUpdateBanner(null)}
+                    className="text-white/80 hover:text-white p-1 text-sm cursor-pointer"
+                    title={t('لاحقاً')}
+                  >
+                    <i className="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* ملصق إعلان الأخطاء والإنذارات البارزة */}
             {errorAnnouncement && (
@@ -6278,6 +6584,14 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                             {isTrueOpt && <i aria-hidden="true" className="fa-solid fa-check text-emerald-600 shrink-0"></i>}
                             {isFalseOpt && <i aria-hidden="true" className="fa-solid fa-xmark text-red-500 shrink-0"></i>}
                             <bdi className="flex-1 min-w-0 break-words">{opt}</bdi>
+                            <button 
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); speak(opt, true, getContentLanguage(shuffledQuestions[currentIndex])); }}
+                              className="text-slate-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-indigo-50/70 transition shrink-0 cursor-pointer"
+                              title={t('استمع للخيار')}
+                            >
+                              <i className="fa-solid fa-volume-low text-xs"></i>
+                            </button>
                             {isAnswerChecked && i === shuffledQuestions[currentIndex].correct && (
                               <i className="fa-solid fa-circle-check text-emerald-500 shrink-0 text-lg"></i>
                             )}
@@ -6613,9 +6927,21 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
             </div>
           </div>
 
-          {/* Footer بسيط */}
-          <footer className="mt-4 text-center text-xs text-slate-400 font-medium">
-            {t('المولّد الذكي للاختبارات • مدعوم بتقنيات الذكاء الاصطناعي وعلم الذاكرة (Mnemonics)')}
+          {/* Footer مع شارة الإصدار ومحرك الصوت وفحص التحديث الفوري */}
+          <footer className="mt-4 mb-2 flex flex-col sm:flex-row items-center justify-center gap-3 text-xs text-slate-500 font-medium">
+            <span>{t('المولّد الذكي للاختبارات • مدعوم بتقنيات الذكاء الاصطناعي وعلم الذاكرة (Mnemonics)')}</span>
+            <button
+              type="button"
+              onClick={() => checkAppVersion(true)}
+              title={t('فحص تحديثات التطبيق وصوت الذكاء الاصطناعي')}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-700 hover:text-indigo-800 rounded-full text-[11px] font-bold transition shadow-xs cursor-pointer"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>v{APP_CLIENT_VERSION}</span>
+              <span className="text-slate-300">•</span>
+              <span className="text-indigo-600 font-black">🎙️ {t('صوت AI حصراً')}</span>
+              {checkingVersion ? <i className="fa-solid fa-spinner fa-spin text-[10px]"></i> : <i className="fa-solid fa-rotate text-[10px] text-slate-400"></i>}
+            </button>
           </footer>
         </div>
       );
