@@ -226,6 +226,16 @@
       'حد إجمالي دائم، وليس يومياً. المذاكرة وإعادة الاختبار والصوت وتقييم الإجابات لا تستهلك مواد إضافية.': 'This is a lifetime allowance, not a daily limit. Studying, retaking quizzes, audio and answer evaluation do not use additional materials.',
       'للضيف مادة واحدة محفوظة على هذا الجهاز. يحدد الخادم الحد؛ مسح التخزين قد يفقد المادة والتقدم.': 'Guests get one material, saved on this device. The server enforces the allowance; clearing storage may lose your material and progress.',
       'لا توجد مواد متبقية. يمكنك متابعة مذاكرة المادة المحفوظة أو طلب زيادة الحد من المشرف.': 'No materials remaining. Continue studying saved material or ask the administrator to increase your allowance.',
+      'نفد حد المواد': 'Material allowance exhausted',
+      'نفد حد المواد المتاحة للزائر': 'Guest material allowance exhausted',
+      'استنفدت رصيد المواد المتاح لحسابك': 'Account material allowance exhausted',
+      'لقد استهلكت المادة المجانية المتاحة لك كزائر على هذا الجهاز. سجّل دخولك أو أنشئ حساباً جديداً للوصول إلى مواد جديدة وحفظ اختباراتك سحابياً!': 'You have used the free material allowance available for guests on this device. Sign in or create a new account to access more materials and save your quizzes to the cloud!',
+      'لقد استهلكت كامل المواد المخصصة لحسابك ({used} من {limit}). يمكنك متابعة موادك المحفوظة أو التواصل مع المشرف لزيادة الحد.': 'You have used all materials allocated for your account ({used} of {limit}). Continue studying saved materials or ask the administrator to increase your allowance.',
+      'تسجيل الدخول / إنشاء حساب': 'Sign in / Register',
+      'استعراض موادي المحفوظة': 'View my saved materials',
+      'تبديل الحساب': 'Switch account',
+      'متابعة المادة': 'Resume material',
+      'أو جرب اختباراً نموذجياً سريعاً': 'Or try a quick demo quiz',
       'توجد عملية توليد معلقة. ألغها أو انتظر انتهاء حجزها.': 'A generation is pending. Cancel it or wait for the reservation to expire.',
       'تحديث الحد': 'Refresh allowance',
       'متابعة المادة المحفوظة': 'Resume saved material',
@@ -2241,6 +2251,9 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
       const ownerKey = authToken ? `account:${authToken}` : 'guest';
       const canGenerateMaterial = sessionOwner === ownerKey && !quotaLoading && !quotaError && !!materialQuota &&
         materialQuota.canGenerate === true;
+      const isAllowanceExhausted = sessionOwner === ownerKey && !quotaLoading && !quotaError && !!materialQuota &&
+        materialQuota.materialLimit !== null &&
+        (materialQuota.remaining <= 0 || materialQuota.canGenerate === false);
       const refreshMaterialQuota = async (token = authToken) => {
         setQuotaLoading(true);
         setQuotaError('');
@@ -3641,6 +3654,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
 
       // معالجة اختيار ملفات وصور متعددة (تراكمية)
       const handleFilesSelected = (fileList) => {
+        if (!canGenerateMaterial) return;
         if (!fileList || fileList.length === 0) return;
         const newFiles = Array.from(fileList);
         const processed = newFiles.map(file => {
@@ -4421,6 +4435,101 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
             </dl>
             {quotaLoading ? <p role="status" className="mt-2 text-center text-xs">{t('جاري تحميل الأعداد...')}</p> : (quotaError || !materialQuota) && <p role="alert" className="mt-2 text-center text-xs text-rose-700">{t('تعذر تحميل الأعداد')}</p>}
           </section>
+        );
+      };
+      const renderAllowanceExhaustedOverlay = () => {
+        const isGuest = !currentUser || !authToken;
+        return (
+          <div
+            className="absolute inset-0 z-20 bg-slate-900/80 backdrop-blur-[2px] rounded-3xl p-5 sm:p-6 flex flex-col items-center justify-center text-center text-white shadow-2xl animate-in fade-in duration-200"
+            role="region"
+            aria-label={t('نفد حد المواد')}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => e.preventDefault()}
+          >
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mx-auto mb-3 text-amber-300 shadow-inner">
+              <i className={`fa-solid ${isGuest ? 'fa-user-lock' : 'fa-hourglass-end'} text-2xl`}></i>
+            </div>
+
+            <h3 className="text-base sm:text-lg font-black text-white mb-1.5 leading-snug">
+              {isGuest ? t('نفد حد المواد المتاحة للزائر') : t('استنفدت رصيد المواد المتاح لحسابك')}
+            </h3>
+
+            <p className="text-xs sm:text-sm text-slate-200/90 leading-relaxed max-w-sm mx-auto mb-4 font-medium">
+              {isGuest
+                ? t('لقد استهلكت المادة المجانية المتاحة لك كزائر على هذا الجهاز. سجّل دخولك أو أنشئ حساباً جديداً للوصول إلى مواد جديدة وحفظ اختباراتك سحابياً!')
+                : t('لقد استهلكت كامل المواد المخصصة لحسابك ({used} من {limit}). يمكنك متابعة موادك المحفوظة أو التواصل مع المشرف لزيادة الحد.', {
+                    used: materialQuota?.materialsUsed ?? 0,
+                    limit: materialQuota?.materialLimit ?? 1
+                  })}
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 w-full max-w-sm">
+              {isGuest ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => openHeaderDialog(setShowAuthModal)}
+                    className="w-full sm:w-auto flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-blue-500 via-indigo-600 to-purple-600 hover:from-blue-600 hover:to-indigo-700 text-white px-5 py-3 rounded-2xl font-black text-xs sm:text-sm shadow-lg shadow-indigo-500/30 transition transform hover:scale-[1.02] active:scale-95 cursor-pointer"
+                  >
+                    <i className="fa-solid fa-right-to-bracket text-sm"></i>
+                    <span>{t('تسجيل الدخول / إنشاء حساب')}</span>
+                  </button>
+                  {guestSavedMaterial && (
+                    <button
+                      type="button"
+                      onClick={resumeGuestMaterial}
+                      className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-white/20 hover:bg-white/30 text-white px-3.5 py-3 rounded-2xl font-bold text-xs border border-white/25 transition cursor-pointer"
+                      title={t('متابعة المادة المحفوظة')}
+                    >
+                      <i className="fa-solid fa-book-open"></i>
+                      <span>{t('متابعة المادة')}</span>
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { openHeaderDialog(setShowUserDashboard); fetchUserMaterials(); }}
+                    className="w-full sm:w-auto flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-blue-500 via-indigo-600 to-purple-600 hover:from-blue-600 hover:to-indigo-700 text-white px-5 py-3 rounded-2xl font-black text-xs sm:text-sm shadow-lg shadow-indigo-500/30 transition transform hover:scale-[1.02] active:scale-95 cursor-pointer"
+                  >
+                    <i className="fa-solid fa-folder-open text-sm"></i>
+                    <span>{t('استعراض موادي المحفوظة')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openHeaderDialog(setShowAuthModal)}
+                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-white/20 hover:bg-white/30 text-white px-3.5 py-3 rounded-2xl font-bold text-xs border border-white/25 transition cursor-pointer"
+                    title={t('تبديل الحساب')}
+                  >
+                    <i className="fa-solid fa-user-plus"></i>
+                    <span>{t('تبديل الحساب')}</span>
+                  </button>
+                </>
+              )}
+            </div>
+
+            {materialQuota?.pendingGenerationId && !generationRef.current && (
+              <button
+                type="button"
+                disabled={quotaLoading}
+                onClick={cancelPendingReservation}
+                className="mt-3 text-[11px] text-rose-300 hover:text-white underline font-bold transition cursor-pointer"
+              >
+                {t('إلغاء الحجز المعلق')}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={loadDemoQuestions}
+              className="mt-3 text-[11px] text-indigo-200 hover:text-white flex items-center gap-1 font-bold underline transition cursor-pointer"
+            >
+              <i className="fa-solid fa-bolt text-amber-300"></i>
+              <span>{t('أو جرب اختباراً نموذجياً سريعاً')}</span>
+            </button>
+          </div>
         );
       };
       // Do not flash material from the previous owner while React resets the workspace.
@@ -5833,7 +5942,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                     </div>
                   )}
 
-                  {!authToken && guestSavedMaterial && (
+                  {!authToken && guestSavedMaterial && !isAllowanceExhausted && (
                     <button type="button" onClick={resumeGuestMaterial} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 transition text-sm font-bold">
                       <i aria-hidden="true" className="fa-solid fa-book-open"></i>
                       {t('متابعة المادة المحفوظة')}
@@ -5857,48 +5966,52 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                   </div>
 
                   {uploadTab === 'file' ? (
-                    <div>
+                    <div className={`relative rounded-3xl overflow-hidden ${isAllowanceExhausted ? 'min-h-[290px]' : ''}`}>
                       <input 
                         type="file" 
                         multiple
+                        disabled={!canGenerateMaterial}
                         accept=".pdf,.docx,.jpg,.jpeg,.png,.webp,image/*,application/pdf" 
                         className="hidden" 
                         ref={fileInputRef} 
                         onChange={(e) => {
+                          if (!canGenerateMaterial) return;
                           handleFilesSelected(e.target.files);
                           e.target.value = '';
                         }}
                       />
 
-                      {selectedFiles.length === 0 ? (
-                        <div 
-                          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                          onDragLeave={() => setIsDragging(false)}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            setIsDragging(false);
-                            handleFilesSelected(e.dataTransfer.files);
-                          }}
-                          onClick={() => { initAudio(); fileInputRef.current?.click(); }}
-                          className={`w-full flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed rounded-3xl transition group cursor-pointer ${
-                            isDragging 
-                              ? 'border-indigo-600 bg-indigo-100/70 scale-[1.01]' 
-                              : 'border-indigo-300 hover:border-indigo-500 bg-indigo-50/50 hover:bg-indigo-50'
-                          }`}
-                        >
-                          <div className="w-16 h-16 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform shadow-inner">
-                            <i className="fa-solid fa-images text-2xl"></i>
+                      <div className={isAllowanceExhausted ? 'opacity-30 grayscale pointer-events-none select-none filter blur-[0.5px] transition-all duration-300' : ''}>
+                        {selectedFiles.length === 0 ? (
+                          <div 
+                            onDragOver={(e) => { if (!canGenerateMaterial) return; e.preventDefault(); setIsDragging(true); }}
+                            onDragLeave={() => setIsDragging(false)}
+                            onDrop={(e) => {
+                              if (!canGenerateMaterial) return;
+                              e.preventDefault();
+                              setIsDragging(false);
+                              handleFilesSelected(e.dataTransfer.files);
+                            }}
+                            onClick={() => { if (!canGenerateMaterial) return; initAudio(); fileInputRef.current?.click(); }}
+                            className={`w-full flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed rounded-3xl transition group cursor-pointer ${
+                              isDragging 
+                                ? 'border-indigo-600 bg-indigo-100/70 scale-[1.01]' 
+                                : 'border-indigo-300 hover:border-indigo-500 bg-indigo-50/50 hover:bg-indigo-50'
+                            }`}
+                          >
+                            <div className="w-16 h-16 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform shadow-inner">
+                              <i className="fa-solid fa-images text-2xl"></i>
+                            </div>
+                            <div className="text-center">
+                              <span className="block font-black text-slate-800 text-lg">{t('اختر عدة صور أو مستندات معاً')}</span>
+                              <span className="block text-xs font-semibold text-slate-500 mt-1">{t('يدعم اختيار عدة صور لصفحات الكتاب، PDF، أو مستندات Word')}</span>
+                            </div>
+                            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-white px-3 py-1.5 rounded-full shadow-sm border border-indigo-100">
+                              <i className="fa-solid fa-plus-circle text-indigo-500"></i> {t('يدعم تحديد ودمج عدة ملفات في جلسة واحدة')}
+                            </span>
                           </div>
-                          <div className="text-center">
-                            <span className="block font-black text-slate-800 text-lg">{t('اختر عدة صور أو مستندات معاً')}</span>
-                            <span className="block text-xs font-semibold text-slate-500 mt-1">{t('يدعم اختيار عدة صور لصفحات الكتاب، PDF، أو مستندات Word')}</span>
-                          </div>
-                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-white px-3 py-1.5 rounded-full shadow-sm border border-indigo-100">
-                            <i className="fa-solid fa-plus-circle text-indigo-500"></i> {t('يدعم تحديد ودمج عدة ملفات في جلسة واحدة')}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="space-y-4 text-right">
+                        ) : (
+                          <div className="space-y-4 text-right">
                           {/* شريط الملخص وأزرار التحكم */}
                           <div className="flex items-center justify-between bg-indigo-50/80 border border-indigo-100 p-3 rounded-2xl">
                             <div className="flex items-center gap-2.5">
@@ -6000,35 +6113,47 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
                           </button>
                         </div>
                       )}
+                      </div>
+
+                      {/* الغطاء المعتم الرمادي عند نفاد حد المواد */}
+                      {isAllowanceExhausted && renderAllowanceExhaustedOverlay()}
                     </div>
                   ) : (
-                    <div className="space-y-3 text-right">
-                      <textarea 
-                        rows="4" 
-                        value={textInput}
-                        onChange={(e) => setTextInput(e.target.value)}
-                        dir="auto" placeholder={t('الصق نص الدرس أو ملخص الأسئلة هنا...')}
-                        className="w-full p-3.5 border-2 border-slate-200 rounded-2xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none text-sm leading-relaxed"
-                      ></textarea>
-                      <button 
-                        onClick={handleTextSubmit}
-                        disabled={!canGenerateMaterial || isProcessingFiles}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3.5 rounded-2xl font-bold transition shadow-lg shadow-indigo-100"
-                      >
-                        {t('تحليل النص الذكي')} <i className="fa-solid fa-arrow-left mr-1"></i>
-                      </button>
+                    <div className={`relative rounded-3xl overflow-hidden ${isAllowanceExhausted ? 'min-h-[290px]' : ''}`}>
+                      <div className={isAllowanceExhausted ? 'opacity-30 grayscale pointer-events-none select-none filter blur-[0.5px] space-y-3 text-right transition-all duration-300' : 'space-y-3 text-right'}>
+                        <textarea 
+                          rows="4" 
+                          disabled={isAllowanceExhausted}
+                          value={textInput}
+                          onChange={(e) => setTextInput(e.target.value)}
+                          dir="auto" placeholder={t('الصق نص الدرس أو ملخص الأسئلة هنا...')}
+                          className="w-full p-3.5 border-2 border-slate-200 rounded-2xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none text-sm leading-relaxed"
+                        ></textarea>
+                        <button 
+                          onClick={handleTextSubmit}
+                          disabled={!canGenerateMaterial || isProcessingFiles}
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3.5 rounded-2xl font-bold transition shadow-lg shadow-indigo-100"
+                        >
+                          {t('تحليل النص الذكي')} <i className="fa-solid fa-arrow-left mr-1"></i>
+                        </button>
+                      </div>
+
+                      {/* الغطاء المعتم الرمادي عند نفاد حد المواد */}
+                      {isAllowanceExhausted && renderAllowanceExhaustedOverlay()}
                     </div>
                   )}
 
                   {/* تجربة فورية بدون ملف */}
-                  <div className="pt-2 border-t border-slate-100">
-                    <button 
-                      onClick={loadDemoQuestions}
-                      className="text-indigo-600 hover:text-indigo-800 text-xs font-bold transition flex items-center justify-center gap-1 mx-auto"
-                    >
-                      <i className="fa-solid fa-bolt"></i> {t('لا تملك ملفاً الآن؟ جرب اختباراً نموذجياً سريعاً')}
-                    </button>
-                  </div>
+                  {!isAllowanceExhausted && (
+                    <div className="pt-2 border-t border-slate-100">
+                      <button 
+                        onClick={loadDemoQuestions}
+                        className="text-indigo-600 hover:text-indigo-800 text-xs font-bold transition flex items-center justify-center gap-1 mx-auto"
+                      >
+                        <i className="fa-solid fa-bolt"></i> {t('لا تملك ملفاً الآن؟ جرب اختباراً نموذجياً سريعاً')}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
