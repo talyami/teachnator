@@ -17,14 +17,12 @@ function cleanBearer(value) {
   return String(value || '').trim().replace(/^(?:bearer\s+)+/i, '').trim();
 }
 
-async function requestJson(url, headers, payload, timeoutMs = 45000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+async function requestJson(url, headers, payload) {
   try {
     // Never forward credentials across redirects or return upstream errors verbatim.
     const response = await fetch(url, {
       method: 'POST', headers, body: JSON.stringify(payload),
-      signal: controller.signal, redirect: 'error'
+      redirect: 'error'
     });
     if (!response.ok) {
       throw fail(response.status === 429 ? 429 : 502,
@@ -32,11 +30,8 @@ async function requestJson(url, headers, payload, timeoutMs = 45000) {
     }
     return await response.json();
   } catch (error) {
-    if (controller.signal.aborted) throw fail(504, 'انتهت مهلة طلب الذكاء الاصطناعي، حاول مرة أخرى.');
     if (error.status) throw error;
     throw fail(502, 'تعذر الاتصال بمزود الذكاء الاصطناعي.');
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -216,12 +211,23 @@ async function generateBrain(settings, payload) {
   }
   if (Number.isFinite(config.temperature) && config.temperature >= 0 && config.temperature <= 2) body.temperature = config.temperature;
   if (Number.isFinite(config.topP) && config.topP >= 0 && config.topP <= 1) body.top_p = config.topP;
-  if (Number.isInteger(config.maxOutputTokens) && config.maxOutputTokens > 0) body.max_tokens = Math.min(config.maxOutputTokens, 32768);
-  // Full lesson extraction needs more time than short connection/TTS tests.
-  // The AI route sends heartbeats while waiting; still bound provider work to 90s.
-  const data = await requestJson(url.toString(), { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body, 90000);
-  const text = data?.choices?.[0]?.message?.content;
+  if (Number.isInteger(config.maxOutputTokens) && config.maxOutputTokens > 0) body.max_tokens = config.maxOutputTokens;
+  const data = await requestJson(url.toString(), { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body);
+  const choice = data?.choices?.[0];
+  const text = choice?.message?.content;
+  if (choice?.finish_reason === 'length') {
+    throw fail(502, 'توقف رد الذكاء الاصطناعي عند حد حجم الإجابة قبل اكتماله. قلّل حجم المادة أو قسّمها إلى أجزاء ثم حاول مرة أخرى.');
+  }
   if (typeof text !== 'string' || !text.trim()) throw fail(502, 'لم يرجع مزود الذكاء الاصطناعي محتوى صالحاً.');
+  if (config.responseMimeType === 'application/json') {
+    // Validate before settling the generation successfully or charging its quota.
+    // Never invent missing text or silently discard truncated questions.
+    try {
+      JSON.parse(text.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim());
+    } catch (_) {
+      throw fail(502, 'أرجع مزود الذكاء الاصطناعي إجابة غير مكتملة أو بتنسيق غير صالح. حاول مرة أخرى أو قسّم المادة إلى أجزاء أصغر.');
+    }
+  }
   const result = { candidates: [{ content: { role: 'model', parts: [{ text }] } }] };
   if (data.usage) {
     result.usageMetadata = {

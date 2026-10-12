@@ -998,16 +998,12 @@
                 }
               };
 
-              const timeoutController = new AbortController();
-              const timeoutId = setTimeout(() => timeoutController.abort(), 45000);
-              const combinedSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
-
               const res = await fetch(ttsUrl, {
                 method: "POST",
                 headers,
                 body: JSON.stringify(payload),
-                signal: combinedSignal
-              }).finally(() => clearTimeout(timeoutId));
+                signal
+              });
 
               if (!res.ok) {
                 if (res.status === 404) {
@@ -1078,10 +1074,6 @@
                 }
               };
 
-            const timeoutController = new AbortController();
-            const timeoutId = setTimeout(() => timeoutController.abort(), 45000);
-            const combinedSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
-
             let res;
             if (token && (hasServerAi || !effectiveKey)) {
               res = await fetch(getApiUrl('/ai/generate'), {
@@ -1096,20 +1088,20 @@
                   provider: 'gemini',
                   personalApiKey: effectiveKey
                 }),
-                signal: combinedSignal
+                signal
               }).then(async r => {
                 if (!r.ok) return { ok: false, status: r.status };
                 const j = await r.json();
                 return { ok: true, status: 200, json: async () => j.data || j };
-              }).finally(() => clearTimeout(timeoutId));
+              });
             } else {
               const ttsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${effectiveKey}`;
               res = await fetch(ttsUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
-                signal: combinedSignal
-              }).finally(() => clearTimeout(timeoutId));
+                signal
+              });
             }
 
             if (!res.ok) {

@@ -174,6 +174,8 @@ function limitAiRequests(req, res, next) {
 
 // توليد المحتوى أو الاختبارات أو تقييم الإجابات
 app.post('/api/ai/generate', limitAiRequests, async (req, res) => {
+  if (req.setTimeout) req.setTimeout(0);
+  if (res.setTimeout) res.setTimeout(0);
   // JSON whitespace keeps idle reverse proxies alive without changing the client
   // contract: response.json() waits for the final object. After a heartbeat, errors
   // use success:false because the HTTP status has already been sent.
