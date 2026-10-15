@@ -2145,8 +2145,8 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
     };
 
     // ثوابت إصدار الواجهة ومحرك الصوت الحصري
-    const APP_CLIENT_VERSION = '1.2.0';
-    const APP_CLIENT_BUILD = '20261012-v120';
+    const APP_CLIENT_VERSION = '1.2.1';
+    const APP_CLIENT_BUILD = '20261015-v121';
 
     // التطبيق الرئيسي
     function App() {
@@ -2812,7 +2812,7 @@ True/false and yes/no options must also use the source language (e.g. ["True", "
             setUpdateBanner({
               version: data.version,
               build: data.build,
-              message: t('🚀 يتوفر تحديث جديد للتطبيق ({version})! تم حظر الصوت الروبوتي وتفعيل صوت الذكاء الاصطناعي.', { version: data.version })
+              message: t('🚀 يتوفر تحديث جديد للتطبيق ({version})! اضغط لتحديث فوري.', { version: data.version })
             });
             if (isManual) {
               setAppAnnouncement({

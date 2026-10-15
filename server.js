@@ -670,8 +670,8 @@ app.get('/api/version', async (req, res) => {
   } catch (err) {
     res.json({
       success: true,
-      version: '1.2.0',
-      build: '20261012-v120',
+      version: '1.2.1',
+      build: '20261015-v121',
       forceReload: false,
       audioEngine: 'ai_only_no_robot',
       timestamp: Date.now()
@@ -683,7 +683,7 @@ app.get('/api/config', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
-  let versionInfo = { version: '1.2.0', build: '20261012-v120', forceReload: false };
+  let versionInfo = { version: '1.2.1', build: '20261015-v121', forceReload: false };
   try {
     versionInfo = await getAppVersion();
   } catch (e) {}

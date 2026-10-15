@@ -199,8 +199,8 @@ async function transaction(work) {
 }
 
 // استرجاع إصدار التطبيق من قاعدة البيانات (مع التراجع الآمن في حال عدم الاتصال)
-const DEFAULT_APP_VERSION = '1.2.0';
-const DEFAULT_APP_BUILD = '20261012-v120';
+const DEFAULT_APP_VERSION = '1.2.1';
+const DEFAULT_APP_BUILD = '20261015-v121';
 
 async function getAppVersion() {
   if (isDbConnected) {
