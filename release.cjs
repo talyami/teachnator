@@ -1,7 +1,7 @@
 'use strict';
 // Shared by the compiled frontend and server. Change together for each release.
 const version = '1.3.0';
-const build = '20261020-teachnator-fix1';
+const build = '20261020-teachnator-fix2';
 const releaseKey = release => `${release.version || ''}:${release.build || ''}`;
 function hasUpdate(release) {
   return Boolean(release?.version && (release.version !== version || (release.build && release.build !== build)));
