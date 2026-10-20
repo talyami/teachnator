@@ -1,0 +1,61 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { createWebhookNotifier, getMonitorConfig, evaluateMonitor, validateMonitorState } = require('./monitoring');
+test('optional webhook is HTTPS, sanitized, timeout bounded and rejects redirects', async () => {
+  let calls = 0;
+  const noWebhook = createWebhookNotifier({ env: {}, fetchImpl: () => { calls++; } });
+  assert.deepEqual(await noWebhook({}), { delivered: false, reason: 'not_configured' }); assert.equal(calls, 0);
+  for (const url of ['http://a.example/secret', 'https://name:pass@a.example', 'https://a.example/#secret', 'x', 'https://a.example/\nsecret']) assert.throws(() => getMonitorConfig({ MONITOR_WEBHOOK_URL: url }), /INVALID_MONITOR_WEBHOOK/);
+  assert.throws(() => getMonitorConfig({ MONITOR_WEBHOOK_TIMEOUT_MS: '99999' }), /Invalid/);
+  const notify = createWebhookNotifier({ env: { MONITOR_WEBHOOK_URL: 'https://hooks.example/private-token?secret=hidden' }, fetchImpl: async (url, options) => {
+    calls++;
+    assert.match(url, /private-token/); assert.equal(options.redirect, 'error'); assert.ok(options.signal);
+    const payload = JSON.parse(options.body);
+    assert.deepEqual(payload, { type: 'monitor_transition', state: 'failure', failedChecks: ['backup'], release: 'r1' });
+    assert.doesNotMatch(options.body, /private-token|hidden|secret|email|message|http/);
+    return new Response(null, { status: 204 });
+  } });
+  assert.deepEqual(await notify({ type: 'monitor_transition', state: 'failure', failedChecks: ['backup', 'email@secret.com'], release: 'r1', message: 'private' }), { delivered: true });
+  const failed = createWebhookNotifier({ env: { MONITOR_WEBHOOK_URL: 'https://hooks.example/token' }, fetchImpl: async () => { throw new Error('https://hooks.example/token?secret=hidden'); } });
+  await assert.rejects(failed({ type: 'application_error', code: 'DB_UNAVAILABLE', source: 'server', stack: 'private', release: 'r1' }), error => error.message === 'MONITOR_DELIVERY_FAILED' && !String(error.stack).includes('secret=hidden'));
+  const redirect = createWebhookNotifier({ env: { MONITOR_WEBHOOK_URL: 'https://hooks.example/token' }, fetchImpl: async () => new Response(null, { status: 302 }) });
+  await assert.rejects(redirect({ type: 'monitor_transition', state: 'failure' }), /MONITOR_DELIVERY_FAILED/);
+});
+test('application webhook contract strips private data and unapproved route and asset fields', async () => {
+  let payload;
+  const notify = createWebhookNotifier({ env: { MONITOR_WEBHOOK_URL: 'https://hooks.example/private-token' }, fetchImpl: async (_url, options) => { payload = JSON.parse(options.body); return new Response(null, { status: 204 }); } });
+  await notify({ type: 'application_error', code: 'CLIENT_RUNTIME_ERROR', source: 'client', release: 'r1', route: '/api/materials/123?email=a@b.com', asset: 'https://private.example/file.js?token=secret', line: 400, stack: 'private document', headers: { authorization: 'Bearer secret' }, ip: '127.0.0.1', email: 'a@b.com' });
+  assert.deepEqual(payload, { type: 'application_error', code: 'CLIENT_RUNTIME_ERROR', source: 'client', release: 'r1' });
+  assert.doesNotMatch(JSON.stringify(payload), /private|secret|127\.0\.0\.1|a@b.com|https?:/);
+  await assert.rejects(notify({ type: 'application_error', code: 'private raw message', source: 'server' }), /INVALID_MONITOR_EVENT/);
+});
+test('monitor tracks failure, reminders, recovery and retries failed deliveries', async () => {
+  const events = []; const ok = async event => { events.push(event); return { delivered: true }; };
+  let result = await evaluateMonitor({ checks: { readiness: false, backup: false }, now: 1000, cooldownMs: 100, notify: ok });
+  assert.equal(result.transition, 'failure'); assert.equal(result.healthy, false);
+  assert.deepEqual(result.state.lastDelivered.failedChecks, ['readiness', 'backup']);
+  result = await evaluateMonitor({ checks: { readiness: false, backup: false }, previous: result.state, now: 1050, cooldownMs: 100, notify: ok });
+  assert.equal(result.transition, null); assert.equal(events.length, 1);
+  const previous = result.state;
+  result = await evaluateMonitor({ checks: { readiness: false, backup: false }, previous, now: 1100, cooldownMs: 100, notify: async () => { throw new Error('private'); } });
+  assert.equal(result.delivery.reason, 'delivery_failed'); assert.equal(result.state.lastDelivered.at, 1000);
+  result = await evaluateMonitor({ checks: { readiness: true, backup: true }, previous: result.state, now: 1200, notify: async () => { throw new Error('private'); } });
+  assert.equal(result.transition, 'recovery'); assert.equal(result.state.lastDelivered.state, 'failure');
+  result = await evaluateMonitor({ checks: { readiness: true, backup: true }, previous: result.state, now: 1201, notify: ok });
+  assert.equal(result.state.lastDelivered.state, 'recovery'); assert.equal(events.length, 2);
+  assert.equal(validateMonitorState({ version: 1, current: 'failure', failedChecks: ['private'], lastDelivered: null }), null);
+  assert.equal(validateMonitorState({ version: 1, current: 'healthy', failedChecks: ['backup'], lastDelivered: null }), null);
+  assert.equal(validateMonitorState({ version: 1, current: 'failure', failedChecks: ['backup', 'backup'], lastDelivered: null }), null);
+});
+test('unconfigured webhook never records delivery; changed failures alert and clock rollback stays observable', async () => {
+  const noWebhook = async () => ({ delivered: false, reason: 'not_configured' });
+  let result = await evaluateMonitor({ checks: { backup: false }, now: 1000, notify: noWebhook });
+  assert.equal(result.state.lastDelivered, null); assert.equal(result.delivery.delivered, false);
+  const sent = async () => ({ delivered: true });
+  result = await evaluateMonitor({ checks: { backup: false }, previous: result.state, now: 1001, notify: sent });
+  result = await evaluateMonitor({ checks: { disk: false }, previous: result.state, now: 1002, notify: sent });
+  assert.equal(result.transition, 'failure'); assert.deepEqual(result.state.lastDelivered.failedChecks, ['disk']);
+  result = await evaluateMonitor({ checks: { disk: false }, previous: result.state, now: 1, notify: sent });
+  assert.equal(result.transition, 'failure'); assert.equal(result.state.lastDelivered.at, 1);
+});

@@ -4,9 +4,11 @@ node_modules/
 .pnp.js
 
 # Build outputs
-/server/dist
-/web/dist
 /dist
+/backups/
+/.cache/
+*.sql.gz
+*.partial
 
 # Environment and secrets
 .env

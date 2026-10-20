@@ -1,0 +1,12 @@
+# INACTIVE TEMPLATE: copying this file does not enable the timer.
+[Unit]
+Description=Fast Learning nightly backup schedule (operator approval required)
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+Unit=fast-learning-backup.service
+
+[Install]
+WantedBy=timers.target

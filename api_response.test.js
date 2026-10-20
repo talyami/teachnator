@@ -10,7 +10,7 @@ test('API errors stay JSON on root and subpath routes', async () => {
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    for (const prefix of ['/api', '/fast-learning/api']) {
+    for (const prefix of ['/api', '/teachnator/api', '/fast-learning/api']) {
       for (const [path, body, expectedStatus] of [
         ['/ai/generate', '{', 400],
         ['/missing', '{}', 404],

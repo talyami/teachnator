@@ -1,19 +1,43 @@
 {
-  "name": "fast-learning",
+  "name": "teachnator",
   "version": "1.0.0",
   "private": true,
-  "description": "Fast Learning study and memorization app",
+  "description": "Teachnator study and memorization app",
   "main": "server.js",
+  "engines": {
+    "node": ">=22.0.0 <25",
+    "npm": ">=10"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check auth.js && node --check db.js && node --check ai_proxy.js && node --check material_quota.js && node --test material_quota.test.js api_response.test.js ai_heartbeat.test.js"
+    "build": "node scripts/build.js",
+    "check": "node scripts/check.js",
+    "db:migrate": "node scripts/migrate.js",
+    "backup": "node scripts/backup.js",
+    "healthcheck": "node scripts/healthcheck.js",
+    "monitor": "node scripts/monitor.js",
+    "maintenance": "node scripts/maintenance.js"
   },
   "dependencies": {
-    "cors": "^2.8.6",
-    "dotenv": "^18.0.5",
-    "express": "^5.2.1",
-    "jsonwebtoken": "^9.0.3",
-    "mysql2": "^3.24.5"
+    "@fortawesome/fontawesome-free": "7.3.1",
+    "canvas-confetti": "1.9.4",
+    "cors": "2.8.6",
+    "dotenv": "18.0.7",
+    "express": "5.3.0",
+    "jsonwebtoken": "9.0.3",
+    "mammoth": "1.13.0",
+    "mysql2": "3.24.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "overrides": {
+    "postcss-selector-parser": "7.1.6"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "jsdom": "26.1.0",
+    "postcss": "8.5.30",
+    "tailwindcss": "3.4.19"
   }
 }

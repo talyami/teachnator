@@ -1,0 +1,26 @@
+[Unit]
+Description=Fast Learning API and built frontend
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fast-learning
+Group=fast-learning
+WorkingDirectory=/opt/fast-learning
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/fast-learning/.env
+ExecStart=/usr/bin/node /opt/fast-learning/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

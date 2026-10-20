@@ -1,0 +1,12 @@
+# INACTIVE TEMPLATE: deletes expired data only after explicit operator activation.
+[Unit]
+Description=Fast Learning daily approved retention schedule
+
+[Timer]
+OnCalendar=*-*-* 04:15:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+Unit=fast-learning-maintenance.service
+
+[Install]
+WantedBy=timers.target

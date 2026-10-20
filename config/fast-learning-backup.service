@@ -1,0 +1,31 @@
+# INACTIVE TEMPLATE: review paths, credentials and restore drill before installation.
+[Unit]
+Description=Fast Learning private database backup
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fast-learning
+Group=fast-learning
+WorkingDirectory=/opt/fast-learning
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/fast-learning/.env
+ExecStart=/usr/bin/node /opt/fast-learning/scripts/backup.js
+TimeoutStartSec=30min
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/backups/fast-learning
+StandardOutput=journal
+StandardError=journal
