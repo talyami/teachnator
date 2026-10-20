@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'fast-learning-api',
+      name: 'teachnator',
       script: './server.js',
       cwd: __dirname,
       instances: 1,
