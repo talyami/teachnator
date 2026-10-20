@@ -5,7 +5,7 @@ process.env.JWT_SECRET ||= 'policies-offline-test-secret';
 process.env.MONITOR_WEBHOOK_URL = '';
 const auth = require('./auth');
 let authCalls = 0;
-auth.authenticateToken = (_req, res) => { authCalls++; res.status(401).json({ success: false }); };
+auth.authenticateToken = (req, res, next) => { if (['/api/version', '/api/config'].includes(req.path)) return next(); authCalls++; res.status(401).json({ success: false }); };
 const { app } = require('./server');
 async function serve(work) {
   const server = app.listen(0, '127.0.0.1');
@@ -13,6 +13,16 @@ async function serve(work) {
   try { await work(`http://127.0.0.1:${server.address().port}`); }
   finally { await new Promise(resolve => server.close(resolve)); }
 }
+test('version and config report the compiled release, not independently edited DB labels', async () => serve(async base => {
+  const release = require('./release.cjs');
+  for (const route of ['version', 'config']) {
+    const response = await fetch(`${base}/teachnator/api/${route}`);
+    const body = await response.json();
+    assert.equal(body.version, release.version);
+    assert.equal(body.build, release.build);
+    assert.match(response.headers.get('cache-control'), /no-store/);
+  }
+}));
 test('public bilingual policies work at both prefixes even with invalid bearer tokens', async () => serve(async base => {
   authCalls = 0;
   for (const prefix of ['', '/teachnator']) for (const page of ['privacy', 'terms', 'contact']) {

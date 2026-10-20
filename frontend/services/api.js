@@ -131,4 +131,4 @@ import { MAX_AUDIO_RESPONSE_BYTES, readBoundedJson } from './resources.cjs';
 
 
 const setActiveMaterialContext = value => { activeMaterialContext = value; };
-export { getApiUrl, apiHeaders, materialApi, requestAiCompletion, GUEST_MATERIAL_KEY, activeMaterialContext, setActiveMaterialContext };
+export { getApiUrl, apiHeaders, readApiResponse, materialApi, requestAiCompletion, GUEST_MATERIAL_KEY, activeMaterialContext, setActiveMaterialContext };

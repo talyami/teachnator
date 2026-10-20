@@ -2,7 +2,7 @@ import React from 'react';
 import { getContentLanguage, normalizeArabicText, prepareQuizQuestions } from '../domain/questions.cjs';
 const isFillBlankQuestion = q => q?.type === 'fill_blank';
 const isShortAnswerQuestion = q => q?.type === 'short_answer';
-const APP_CLIENT_VERSION = '1.3.0', APP_CLIENT_BUILD = '20261018-v130';
+const { version: APP_CLIENT_VERSION, build: APP_CLIENT_BUILD } = require('../../release.cjs');
 import { uiText } from '../i18n/index.js';
 import { initAudio, playClick, playMemoryAnchor, playFlipTone, playSparkleTone, speakText, updatePinkNoiseLive } from '../services/audio.js';
 

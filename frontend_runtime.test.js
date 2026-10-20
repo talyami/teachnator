@@ -11,7 +11,7 @@ const { createRun } = require('./frontend/domain/study.cjs');
 const { updateTimer } = require('./frontend/domain/timer.cjs');
 
 const APP_URL = 'https://villa.linkflow.page/teachnator/';
-const VERSION = { version: '1.3.0', build: '20261018-v130', forceReload: false };
+const VERSION = { version: require('./release.cjs').version, build: require('./release.cjs').build, forceReload: false };
 const ADMIN = { id: 41, name: 'Runtime Admin', email: 'admin@example.invalid', role: 'admin', auth_provider: 'google', has_server_ai_access: 1, material_limit: null, materials_used: 0 };
 const STUDENT = { id: 42, name: 'Runtime Student', email: 'student@example.invalid', role: 'user', auth_provider: 'google', has_server_ai_access: 1, material_limit: 5, materials_used: 1 };
 const MATERIAL = { id: 71, title: 'Offline saved lesson', question_count: 2, created_at: '2026-10-20T08:00:00.000Z' };
@@ -112,7 +112,7 @@ function installBrowserPrimitives(window) {
   return () => messagePorts.forEach(port => port.close());
 }
 
-async function mountApp(t, { user = null, language = 'en', savedGuest = null } = {}) {
+async function mountApp(t, { user = null, language = 'en', savedGuest = null, versionResponse = () => VERSION } = {}) {
   const source = await runtimeBundle();
   const errors = [];
   const consoleErrors = [];
@@ -168,7 +168,7 @@ async function mountApp(t, { user = null, language = 'en', savedGuest = null } =
       try { diagnostics.push(JSON.parse(options.body)); } catch (_) { diagnostics.push({ code: 'malformed_diagnostic' }); }
       data = { success: true };
     } else if (method === 'GET' && route === '/api/config') data = { googleClientId: '' };
-    else if (method === 'GET' && route === '/api/version') data = VERSION;
+    else if (method === 'GET' && route === '/api/version') data = versionResponse();
     else if (method === 'GET' && route === '/api/auth/me') data = { authenticated: Boolean(user), user };
     else if (method === 'GET' && route === '/api/billing/packs') data = { success: true, enabled: false, paymentsEnabled: false, supportEmail: 'support@example.invalid', packs: [] };
     else if (method === 'GET' && route === '/api/material-quota') data = { success: true, quota };
@@ -299,6 +299,18 @@ test('mounted frontend: guest first render uses subpath APIs without runtime dia
   assertNamed(app.button('Audio and focus settings'), 'Settings trigger');
   assertNamed(app.button('Voice assistant'), 'Narrator toggle');
   app.assertHealthy('guest first render complete');
+});
+
+test('mounted frontend: matching forced release stays quiet and stale banners clear', async t => {
+  let current = { ...VERSION, build: 'different-build', forceReload: false };
+  const app = await mountApp(t, { versionResponse: () => current });
+  const banner = () => [...app.document.querySelectorAll('button')].find(button => /Later|لاحقاً/.test(readableName(button)));
+  assert.ok(banner(), 'A genuinely different build should display an update');
+  current = { ...VERSION, forceReload: true };
+  app.window.Date.now = () => Date.now() + 10000;
+  await app.act(() => app.window.dispatchEvent(new app.window.Event('focus')));
+  await app.waitFor(() => !banner(), 'current release clears the old banner');
+  app.assertHealthy('same build must not reload even with forceReload enabled');
 });
 
 test('mounted frontend: setup typing preserves DOM identity and focus with an accessible label', async t => {

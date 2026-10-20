@@ -3,7 +3,7 @@ import { getContentLanguage, normalizeArabicText, prepareQuizQuestions } from '.
 const getOptionLetter = (index, question) => (getContentLanguage(question).startsWith('ar') ? ['أ','ب','ج','د','هـ','و'] : ['A','B','C','D','E','F'])[index] || String(index + 1);
 const isFillBlankQuestion = q => q?.type === 'fill_blank';
 const isShortAnswerQuestion = q => q?.type === 'short_answer';
-const APP_CLIENT_VERSION = '1.3.0', APP_CLIENT_BUILD = '20261018-v130';
+const { version: APP_CLIENT_VERSION, build: APP_CLIENT_BUILD } = require('../../release.cjs');
 import { uiText, translateUi } from '../i18n/index.js';
 import { initAudio, playClick, playMemoryAnchor, playFlipTone, playSparkleTone, updatePinkNoiseLive } from '../services/audio.js';
 

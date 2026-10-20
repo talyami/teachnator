@@ -28,8 +28,9 @@ const { createErrorTracker } = require('./error_tracking');
 const { createWebhookNotifier } = require('./monitoring');
 
 // Operational reports never receive raw exceptions, request bodies or identities.
+const { version: RELEASE_VERSION, build: RELEASE_BUILD } = require('./release.cjs');
 const diagnostics = createErrorTracker({
-  release: process.env.APP_BUILD_HASH || '20261018-v130',
+  release: RELEASE_BUILD,
   notify: event => createWebhookNotifier()(event),
   assets: (() => {
     try { return require('node:fs').readdirSync(path.join(__dirname, 'dist', 'assets')).filter(name => /^(app|policy|diagnostics)-[a-f0-9]+\.js$/.test(name)); }
@@ -948,7 +949,8 @@ app.post('/api/admin/ai-test', requireAdmin, limitAiRequests, async (req, res) =
         }
       }, { adminTest: true });
       const latency = Date.now() - start;
-      const hasAudio = Boolean(result?.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data);
+      const hasAudio = Boolean(result?.data?.candidates?.[0]?.content?.parts?.some(part => part.inlineData?.data));
+      if (!hasAudio) throw Object.assign(new Error('No audio returned.'), { status: 502 });
       return res.json({ success: true, latency, hasAudio });
     }
     res.status(400).json({ success: false, message: 'نوع الاختبار غير صالح' });
@@ -985,14 +987,17 @@ app.get('/api/version', async (req, res) => {
     res.json({
       success: true,
       ...versionInfo,
+      // The running bundle, not an independently edited DB label, is the release.
+      version: RELEASE_VERSION,
+      build: RELEASE_BUILD,
       audioEngine: 'ai_only_no_robot',
       timestamp: Date.now()
     });
   } catch (_) {
     res.json({
       success: true,
-      version: '1.3.0',
-      build: '20261018-v130',
+      version: RELEASE_VERSION,
+      build: RELEASE_BUILD,
       forceReload: false,
       audioEngine: 'ai_only_no_robot',
       timestamp: Date.now()
@@ -1004,7 +1009,7 @@ app.get('/api/config', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
-  let versionInfo = { version: '1.3.0', build: '20261018-v130', forceReload: false };
+  let versionInfo = { version: RELEASE_VERSION, build: RELEASE_BUILD, forceReload: false };
   try {
     versionInfo = await getAppVersion();
   } catch (_) {}
@@ -1012,8 +1017,8 @@ app.get('/api/config', async (req, res) => {
     googleClientId: process.env.GOOGLE_CLIENT_ID || '',
     appleClientId: '', // Apple Sign-In hidden until cryptographic verification is configured
     dbConnected: isDbConnected(),
-    version: versionInfo.version,
-    build: versionInfo.build,
+    version: RELEASE_VERSION,
+    build: RELEASE_BUILD,
     forceReload: versionInfo.forceReload,
     audioEngine: 'ai_only_no_robot',
     packs: payments.enabled() ? payments.packs() : [],

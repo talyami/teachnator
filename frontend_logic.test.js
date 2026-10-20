@@ -193,7 +193,7 @@ test('rendered app exposes base-aware policy links from an inactive guest worksp
   const previous={window:global.window,document:global.document,localStorage:global.localStorage,sessionStorage:global.sessionStorage,fetch:global.fetch,raf:global.requestAnimationFrame,act:global.IS_REACT_ACT_ENVIRONMENT};
   const dom=new JSDOM('<div id="test-root"></div>',{url:'https://example.test/teachnator/'});
   const response=body=>({ok:true,json:async()=>body,headers:{get:()=>null}});
-  const fakeFetch=async url=>response(String(url).includes('/version')?{version:'1.3.0',build:'20261018-v130'}:String(url).includes('/config')?{supportEmail:'support@example.test'}:String(url).includes('/material-quota')?{success:true,quota:{canGenerate:false,remaining:0}}:{success:true,packs:[]});
+  const fakeFetch=async url=>response(String(url).includes('/version')?{version:require('./release.cjs').version,build:require('./release.cjs').build}:String(url).includes('/config')?{supportEmail:'support@example.test'}:String(url).includes('/material-quota')?{success:true,quota:{canGenerate:false,remaining:0}}:{success:true,packs:[]});
   Object.assign(global,{window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,sessionStorage:dom.window.sessionStorage,fetch:fakeFetch,requestAnimationFrame:fn=>{fn();return 1;},IS_REACT_ACT_ENVIRONMENT:true});
   window.fetch=fakeFetch;localStorage.setItem('fl_ui_language','en');
   const archive={owner:'guest',generationId:'archive',mode:'intro',playerName:'Student',questionsData:[q()],allOriginalQuestions:[q()]};

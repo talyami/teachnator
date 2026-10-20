@@ -17,8 +17,7 @@ const dbConfig = {
 };
 let pool = null;
 let connected = false;
-const DEFAULT_APP_VERSION = '1.3.0';
-const DEFAULT_APP_BUILD = '20261018-v130';
+const { version: DEFAULT_APP_VERSION, build: DEFAULT_APP_BUILD } = require('./release.cjs');
 
 function getPool() {
   if (!pool) pool = mysql.createPool(dbConfig);

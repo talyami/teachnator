@@ -1,6 +1,6 @@
 import { installAudioUnlock, clearNarration, initAudio, unlockAudio, playClick, playFlipTone, playMasteredTone, playStreakTone, playMemoryAnchor, playCorrect, playWrong, playWin, startAmbientMusic, stopAmbientMusic, triggerConfetti, stopAllSpeech, speakText, prefetchVoice, updatePinkNoiseLive, audioRuntime } from './services/audio.js';
 import { evaluateShortAnswerWithAi, draftQuizFromMaterial, reviseQuizDraft } from './services/generation.js';
-import { getApiUrl, apiHeaders, materialApi, requestAiCompletion, GUEST_MATERIAL_KEY, activeMaterialContext, setActiveMaterialContext } from './services/api.js';
+import { getApiUrl, apiHeaders, readApiResponse, materialApi, requestAiCompletion, GUEST_MATERIAL_KEY, activeMaterialContext, setActiveMaterialContext } from './services/api.js';
 import { getContentLanguage, normalizeArabicText, normalizeQuestion, clampStudyIndex, queueReviewQuestion, addWrongQuestion, shuffledCopy, prepareQuizQuestions, localEvaluateShortAnswer, getSpokenQuestionText } from './domain/questions.cjs';
 import { readUiLanguage, uiText, uiErrorText, translateUi, translateUiError, setUiLanguage as setTranslationLanguage } from './i18n/index.js';
 import React, { useState, useEffect, useRef } from 'react';
@@ -28,8 +28,7 @@ const getSpeechLocale = content => { const language = getContentLanguage(content
     } catch (_) {}
 
     // ثوابت إصدار الواجهة ومحرك الصوت الحصري
-    const APP_CLIENT_VERSION = '1.3.0';
-    const APP_CLIENT_BUILD = '20261018-v130';
+    const { version: APP_CLIENT_VERSION, build: APP_CLIENT_BUILD, hasUpdate, shouldReload, releaseKey } = require('../release.cjs');
 
     // التطبيق الرئيسي
 export default function App() {
@@ -615,7 +614,7 @@ export default function App() {
             },
             body: JSON.stringify({ type })
           });
-          const d = await res.json();
+          const d = await readApiResponse(res);
           setAiTestResult({
             type,
             success: d.success,
@@ -638,6 +637,7 @@ export default function App() {
       };
 
       const lastVersionCheckRef = useRef(0);
+      const dismissedUpdateRef = useRef(null);
       // فحص إصدار التطبيق والمقارنة مع قاعدة البيانات مع دعم التحديث التلقائي (عند التركيز، إعادة الاتصال، والتنقل بين الصفحات)
       const checkAppVersion = async (isManual = false) => {
         const now = Date.now();
@@ -657,9 +657,10 @@ export default function App() {
             forceReload: Boolean(data.forceReload)
           });
 
-          const isNewVersion = data.version !== APP_CLIENT_VERSION || (data.build && data.build !== APP_CLIENT_BUILD);
-          if (isNewVersion || data.forceReload) {
-            if (data.forceReload) {
+          const isNewVersion = hasUpdate(data);
+          if (!isNewVersion) setUpdateBanner(null);
+          if (isNewVersion) {
+            if (shouldReload(data, window.sessionStorage)) {
               setUpdateBanner({
                 version: data.version,
                 build: data.build,
@@ -670,7 +671,7 @@ export default function App() {
               }, 1200);
               return;
             }
-            setUpdateBanner({
+            if (isManual || dismissedUpdateRef.current !== releaseKey(data)) setUpdateBanner({
               version: data.version,
               build: data.build,
               message: t('🚀 يتوفر تحديث جديد للتطبيق ({version})! اضغط لتحديث فوري.', { version: data.version })
@@ -763,7 +764,8 @@ export default function App() {
             setAdminDbVersion({ version: d.version, build: d.build, forceReload: d.forceReload });
             setVersionSaveMsg(t('تم تحديث وحفظ الإصدار في قاعدة البيانات بنجاح ✅'));
             setTimeout(() => setVersionSaveMsg(''), 5000);
-            if (d.forceReload || d.version !== APP_CLIENT_VERSION) {
+            if (!hasUpdate(d)) setUpdateBanner(null);
+            if (hasUpdate(d)) {
               setUpdateBanner({
                 version: d.version,
                 build: d.build,
@@ -2729,7 +2731,7 @@ export default function App() {
                     <span>{t('تحديث الآن')}</span>
                   </button>
                   <button type="button"
-                    onClick={() => setUpdateBanner(null)}
+                    onClick={() => { dismissedUpdateRef.current = releaseKey(updateBanner); setUpdateBanner(null); }}
                     className="text-white/80 hover:text-white p-1 text-sm cursor-pointer"
                     aria-label={t('لاحقاً')} title={t('لاحقاً')}
                   >
